@@ -6,7 +6,25 @@
 set -e
 
 APP_DIR="/var/www/helpdesk/app"
+ENV_BACKUP="/var/www/helpdesk/.env.backup"
 cd "$APP_DIR"
+
+# Restaurar .env se foi deletado pelo git reset
+if [ ! -f ".env" ] && [ -f "$ENV_BACKUP" ]; then
+  echo "[Deploy] Restaurando .env do backup..."
+  cp "$ENV_BACKUP" .env
+fi
+
+# Verificar se .env existe, senão criar com valores mínimos
+if [ ! -f ".env" ]; then
+  echo "[Deploy] AVISO: .env não encontrado! Criando com valores padrão..."
+  echo "[Deploy] ATENÇÃO: Edite /var/www/helpdesk/app/.env com as credenciais corretas!"
+fi
+
+# Sempre manter backup atualizado do .env
+if [ -f ".env" ]; then
+  cp .env "$ENV_BACKUP"
+fi
 
 # Fix: schema.prisma pode ter output absoluto do Abacus AI
 # Remover para usar default (node_modules/.prisma/client relativo)
