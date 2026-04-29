@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getFileUrl, deleteFile } from '@/lib/s3';
 import { getSession } from '@/lib/session';
+import { getStorageProvider, isLocalPath } from '@/lib/storage';
 
 
 export const dynamic = 'force-dynamic';
@@ -37,11 +37,17 @@ export async function GET(
     });
 
     // Gerar URLs de download para cada anexo
+    const storage = getStorageProvider();
     const attachmentsWithUrls = await Promise.all(
-      attachments.map(async (att: any) => ({
-        ...att,
-        downloadUrl: await getFileUrl(att.cloudStoragePath, att.isPublic),
-      }))
+      attachments.map(async (att: any) => {
+        try {
+          const downloadUrl = await storage.getUrl(att.cloudStoragePath, att.isPublic);
+          return { ...att, downloadUrl };
+        } catch {
+          // Fallback: rota de download por ID
+          return { ...att, downloadUrl: `/api/attachments/${att.id}` };
+        }
+      })
     );
 
     return NextResponse.json(attachmentsWithUrls);
@@ -135,8 +141,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Sem permissão' }, { status: 403 });
     }
 
-    // Excluir do S3
-    await deleteFile(attachment.cloudStoragePath);
+    // Excluir do storage (S3 ou local)
+    const storage = getStorageProvider();
+    await storage.delete(attachment.cloudStoragePath);
 
     // Excluir do banco
     await prisma.ticketAttachment.delete({ where: { id: attachmentId } });
