@@ -8,6 +8,13 @@ set -e
 APP_DIR="/var/www/helpdesk/app"
 cd "$APP_DIR"
 
+# Fix: schema.prisma pode ter output absoluto do Abacus AI
+# Remover para usar default (node_modules/.prisma/client relativo)
+if grep -q '/home/ubuntu/winner_tecnologia_site' prisma/schema.prisma 2>/dev/null; then
+  echo "[Deploy] Corrigindo output do Prisma..."
+  sed -i '/output.*winner_tecnologia_site/d' prisma/schema.prisma
+fi
+
 echo "[Deploy] Instalando dependências..."
 yarn install --frozen-lockfile 2>/dev/null || yarn install
 
