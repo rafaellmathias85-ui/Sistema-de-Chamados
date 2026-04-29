@@ -1,3 +1,4 @@
+
 name: Deploy VPS
 
 on:
@@ -19,9 +20,19 @@ jobs:
             git clone https://github.com/rafaellmathias85-ui/Sistema-de-Chamados.git .
           fi
 
+          # PRESERVAR .env antes do git reset
+          if [ -f ".env" ]; then
+            cp .env /var/www/helpdesk/.env.backup
+          fi
+
           git config --global --add safe.directory /var/www/helpdesk/app
           git fetch origin main
           git reset --hard origin/main
+
+          # RESTAURAR .env após git reset
+          if [ -f "/var/www/helpdesk/.env.backup" ]; then
+            cp /var/www/helpdesk/.env.backup .env
+          fi
 
           if [ -f "deploy.sh" ]; then
             cp deploy.sh /var/www/helpdesk/deploy.sh
