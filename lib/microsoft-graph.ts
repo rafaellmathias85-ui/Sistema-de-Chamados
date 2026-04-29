@@ -1,7 +1,6 @@
 // Microsoft Graph API Integration for Email Processing
 import { prisma } from '@/lib/db';
-import { createS3Client, getBucketConfig } from '@/lib/aws-config';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { getStorageProvider } from '@/lib/storage';
 
 interface GraphConfig {
   tenantId: string;
@@ -224,10 +223,9 @@ export async function saveEmailAttachmentsToTicket(
   const attachments = await getEmailAttachments(accessToken, userEmail, messageId);
   if (!attachments.length) return { saved: 0, cidMap: {} };
 
-  const { bucketName, folderPrefix, region } = getBucketConfig();
-  const s3 = createS3Client();
+  const storage = getStorageProvider();
   let saved = 0;
-  const cidMap: Record<string, string> = {}; // cid -> public URL
+  const cidMap: Record<string, string> = {}; // cid -> URL
 
   for (const att of attachments) {
     try {
@@ -235,41 +233,31 @@ export async function saveEmailAttachmentsToTicket(
       if (att['@odata.type'] !== '#microsoft.graph.fileAttachment' || !att.contentBytes) {
         continue;
       }
-      // Imagens inline: salvar e mapear CID para URL pública
-      if (att.isInline && att.contentId) {
-        const buffer = Buffer.from(att.contentBytes, 'base64');
-        const safeName = (att.name || 'inline').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
-        const key = `${folderPrefix}tickets/${ticketId}/inline-${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${safeName}`;
-        await s3.send(new PutObjectCommand({
-          Bucket: bucketName, Key: key, Body: buffer,
-          ContentType: att.contentType || 'image/png',
-        }));
-        const publicUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
-        const cleanCid = att.contentId.replace(/^<|>$/g, '');
-        cidMap[cleanCid] = publicUrl;
-        continue;
-      }
 
       const buffer = Buffer.from(att.contentBytes, 'base64');
       const safeName = (att.name || 'anexo').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
-      const key = `${folderPrefix}tickets/${ticketId}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${safeName}`;
+      const contentType = att.contentType || 'application/octet-stream';
 
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: bucketName,
-          Key: key,
-          Body: buffer,
-          ContentType: att.contentType || 'application/octet-stream',
-          ContentDisposition: 'attachment',
-        }),
-      );
+      // Imagens inline: salvar e mapear CID para URL
+      if (att.isInline && att.contentId) {
+        const inlineName = `tickets/${ticketId}/inline-${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${safeName}`;
+        const { cloudStoragePath } = await storage.save(inlineName, buffer, contentType, true);
+        const url = await storage.getUrl(cloudStoragePath, true);
+        const cleanCid = att.contentId.replace(/^<|>$/g, '');
+        cidMap[cleanCid] = url;
+        continue;
+      }
+
+      // Anexo regular
+      const fileName = `tickets/${ticketId}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${safeName}`;
+      const { cloudStoragePath } = await storage.save(fileName, buffer, contentType, false);
 
       await prisma.ticketAttachment.create({
         data: {
           fileName: att.name || safeName,
           fileSize: att.size || buffer.length,
-          fileType: att.contentType || 'application/octet-stream',
-          cloudStoragePath: key,
+          fileType: contentType,
+          cloudStoragePath,
           isPublic: false,
           ticketId,
           uploadedById: uploader.id,

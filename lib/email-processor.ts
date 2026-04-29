@@ -3,8 +3,7 @@ import { ImapFlow, FetchMessageObject } from 'imapflow';
 import { simpleParser, ParsedMail, Attachment } from 'mailparser';
 import { prisma } from '@/lib/db';
 import { notifyNewTicket } from '@/lib/notifications';
-import { createS3Client, getBucketConfig } from '@/lib/aws-config';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { getStorageProvider } from '@/lib/storage';
 import { sanitizeEmailHtmlAdvanced, generateEmailHeader, detectBounce } from '@/lib/email-sanitizer';
 
 interface EmailConfig {
@@ -218,7 +217,7 @@ async function findTicketByHeaders(parsed: ParsedMail): Promise<string | null> {
   return processedEmail?.ticketId || null;
 }
 
-// Salvar anexos do email no S3 e registrar no banco
+// Salvar anexos do email usando StorageProvider (S3 ou Local)
 async function saveEmailAttachments(
   attachments: Attachment[],
   ticketId: string,
@@ -227,37 +226,42 @@ async function saveEmailAttachments(
 ): Promise<number> {
   if (!attachments || attachments.length === 0) return 0;
   
-  const s3Client = createS3Client();
-  const { bucketName, folderPrefix } = getBucketConfig();
+  const storage = getStorageProvider();
   let saved = 0;
   
   for (const att of attachments) {
-    // Ignorar anexos muito pequenos (provavelmente assinaturas/ícones)
-    if (!att.content || att.size < 100) continue;
+    // Ignorar anexos muito pequenos (provavelmente ícones de assinatura < 500 bytes)
+    if (!att.content || att.size < 500) continue;
     
-    // Ignorar tipos inline que são imagens de assinatura
+    // Imagens inline com contentId são tratadas pela conversão CID→base64/URL
+    // Mas salvar como anexo se tiver nome de arquivo real (não é ícone de assinatura)
     if (att.contentDisposition === 'inline' && att.contentType?.startsWith('image/')) {
-      continue;
+      // Ignorar SOMENTE se for muito pequeno (ícone de assinatura)
+      // ou não tiver nome de arquivo (geralmente assinatura)
+      if (att.size < 5000 || !att.filename) {
+        continue;
+      }
+      // Imagens inline maiores que 5KB com nome são anexos reais
     }
     
     try {
       const fileName = att.filename || `attachment_${Date.now()}`;
-      const fileKey = `${folderPrefix}tickets/${ticketId}/${Date.now()}_${fileName}`;
+      const contentType = att.contentType || 'application/octet-stream';
       
-      await s3Client.send(new PutObjectCommand({
-        Bucket: bucketName,
-        Key: fileKey,
-        Body: att.content,
-        ContentType: att.contentType || 'application/octet-stream',
-      }));
+      const { cloudStoragePath } = await storage.save(
+        `tickets/${ticketId}/${Date.now()}_${fileName}`,
+        att.content,
+        contentType,
+        false,
+      );
       
       await prisma.ticketAttachment.create({
         data: {
           ticketId,
           fileName,
           fileSize: att.size || att.content.length,
-          fileType: att.contentType || 'application/octet-stream',
-          cloudStoragePath: fileKey,
+          fileType: contentType,
+          cloudStoragePath,
           isPublic: false,
           uploadedById,
           uploadedByName,
