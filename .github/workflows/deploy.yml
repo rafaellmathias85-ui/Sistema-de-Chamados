@@ -9,12 +9,28 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Deploy on VPS
         run: |
+          # 1. Garantir que a pasta do app existe e tem as permissões corretas
+          sudo mkdir -p /var/www/helpdesk/app
+          sudo chown -R ubuntu:ubuntu /var/www/helpdesk
+
+          # 2. Entrar na pasta
           cd /var/www/helpdesk/app
-          git fetch origin
+
+          # 3. Se a pasta não for um repositório Git ainda, inicializa
+          if [ ! -d ".git" ]; then
+            git clone https://github.com/rafaellmathias85-ui/Sistema-de-Chamados.git .
+          fi
+
+          # 4. Configurar diretório seguro e atualizar código
+          git config --global --add safe.directory /var/www/helpdesk/app
+          git fetch origin main
           git reset --hard origin/main
-          bash /var/www/helpdesk/deploy.sh
+          
+          # 5. Executar o seu script de deploy
+          if [ -f "/var/www/helpdesk/deploy.sh" ]; then
+            bash /var/www/helpdesk/deploy.sh
+          else
+            echo "Aviso: deploy.sh não encontrado em /var/www/helpdesk/"
+          fi
