@@ -1,0 +1,394 @@
+'use client';
+
+import { useSession } from 'next-auth/react';
+import { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
+import Link from 'next/link';
+import {
+  Monitor,
+  Wifi,
+  WifiOff,
+  Server,
+  Building2,
+  Terminal,
+  Download,
+  RefreshCw,
+  Search,
+  ChevronRight,
+  HardDrive,
+  Cpu,
+  Clock,
+  Trash2,
+  Activity,
+  FileCode2,
+  ShieldAlert,
+  AlertTriangle,
+  FileSpreadsheet,
+  Shield,
+  Network,
+  Zap,
+  Bot,
+  Power,
+  Loader2,
+} from 'lucide-react';
+
+interface RmmMachine {
+  id: string;
+  hostname: string;
+  username: string | null;
+  os: string | null;
+  ram: string | null;
+  diskModel: string | null;
+  diskSize: string | null;
+  status: string;
+  lastLogin: string | null;
+  lastCheckin: string | null;
+  ipAddress: string | null;
+  teamviewerId: string | null;
+  company: { id: string; name: string };
+  _count: { tasks: number };
+}
+
+interface RmmStats {
+  totalMachines: number;
+  onlineMachines: number;
+  offlineMachines: number;
+  totalTasks: number;
+  pendingTasks: number;
+  companiesWithRmm: number;
+}
+
+export default function RmmDashboardPage() {
+  const { data: session } = useSession();
+  const [machines, setMachines] = useState<RmmMachine[]>([]);
+  const [stats, setStats] = useState<RmmStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [filterCompany, setFilterCompany] = useState('');
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [reactivating, setReactivating] = useState<string | null>(null);
+
+  const isAdmin = session?.user?.role === 'ADMIN';
+
+  const fetchData = async () => {
+    try {
+      const [machinesRes, statsRes, companiesRes] = await Promise.all([
+        fetch(`/api/rmm/machines${filterCompany ? `?companyId=${filterCompany}` : ''}`),
+        fetch('/api/rmm/stats'),
+        fetch('/api/companies?limit=500'),
+      ]);
+
+      if (machinesRes.ok) setMachines(await machinesRes.json());
+      if (statsRes.ok) setStats(await statsRes.json());
+      if (companiesRes.ok) {
+        const data = await companiesRes.json();
+        setCompanies(Array.isArray(data) ? data : data.companies || []);
+      }
+    } catch (e) {
+      console.error('Erro ao carregar dados RMM:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30000); // Auto-refresh 30s
+    return () => clearInterval(interval);
+  }, [filterCompany]);
+
+  const handleDeleteMachine = async (id: string) => {
+    if (!confirm('Tem certeza que deseja remover esta máquina?')) return;
+    setDeleting(id);
+    try {
+      const res = await fetch(`/api/rmm/machines/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setMachines((prev) => prev.filter((m) => m.id !== id));
+      }
+    } catch (e) {
+      console.error('Erro ao excluir:', e);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleReactivateAgent = async (machineId: string) => {
+    if (reactivating) return;
+    setReactivating(machineId);
+    try {
+      const res = await fetch(`/api/rmm/machines/${machineId}/reactivate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.recoveryScript) {
+          const blob = new Blob([data.recoveryScript], { type: 'text/plain;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `reativar-rmm-${data.hostname || 'agente'}.ps1`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        alert('Ping enviado! Se o agente responder, ficara online em 1-2 min.\n\nSe NAO responder, execute o script de recuperacao baixado como Administrador na maquina.');
+      } else {
+        alert('Erro ao tentar reativar o agente.');
+      }
+    } catch (e) {
+      console.error('Erro ao reativar:', e);
+      alert('Erro ao tentar reativar o agente.');
+    } finally {
+      setReactivating(null);
+    }
+  };
+
+  const filtered = machines.filter((m) => {
+    const q = search.toLowerCase();
+    return (
+      m.hostname.toLowerCase().includes(q) ||
+      (m.username || '').toLowerCase().includes(q) ||
+      (m.ipAddress || '').toLowerCase().includes(q) ||
+      m.company.name.toLowerCase().includes(q)
+    );
+  });
+
+  const formatDate = (d: string | null) => {
+    if (!d) return '—';
+    return new Date(d).toLocaleString('pt-BR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="w-8 h-8 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-montserrat font-bold tm-text flex items-center gap-3">
+            <Monitor className="text-accent-blue" size={28} />
+            RMM — Monitoramento Remoto
+          </h1>
+          <p className="tm-text-secondary mt-1">Gerencie máquinas e execute comandos remotamente</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setLoading(true); fetchData(); }}
+            className="px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text hover:bg-white/10 transition flex items-center gap-2 text-sm"
+          >
+            <RefreshCw size={16} /> Atualizar
+          </button>
+          {isAdmin && (
+            <Link
+              href="/tickets/rmm/agent"
+              className="px-4 py-2 bg-accent-blue hover:bg-blue-600 text-white rounded-lg transition flex items-center gap-2 text-sm font-medium"
+            >
+              <Download size={16} /> Gerar Agente
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* Quick Nav */}
+      <div className="flex flex-wrap gap-2">
+        {[
+          { href: '/tickets/rmm/security', icon: Shield, label: 'Segurança (SIEM)', color: 'text-red-400' },
+          { href: '/tickets/rmm/network', icon: Network, label: 'Rede (SNMP)', color: 'text-cyan-400' },
+          { href: '/tickets/rmm/playbooks', icon: Zap, label: 'Playbooks', color: 'text-yellow-400' },
+          { href: '/tickets/rmm/ai-chat', icon: Bot, label: 'Assistente IA', color: 'text-purple-400' },
+          { href: '/tickets/rmm/scripts', icon: FileCode2, label: 'Scripts Remotos', color: 'text-cyan-400' },
+          { href: '/tickets/rmm/policies', icon: ShieldAlert, label: 'Políticas de Alerta', color: 'text-yellow-400' },
+          { href: '/tickets/rmm/alerts', icon: AlertTriangle, label: 'Alertas', color: 'text-red-400' },
+          { href: '/tickets/rmm/export', icon: FileSpreadsheet, label: 'Exportar', color: 'text-green-400' },
+        ].map(nav => (
+          <Link key={nav.href} href={nav.href} className="flex items-center gap-2 px-4 py-2.5 tm-bg-card border tm-border rounded-lg hover:bg-white/10 transition-colors text-sm">
+            <nav.icon size={16} className={nav.color} />
+            <span className="tm-text">{nav.label}</span>
+          </Link>
+        ))}
+      </div>
+
+      {/* Stats Cards */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: 'Total Máquinas', value: stats.totalMachines, icon: Server, color: 'text-blue-400' },
+            { label: 'Online', value: stats.onlineMachines, icon: Wifi, color: 'text-green-400' },
+            { label: 'Offline', value: stats.offlineMachines, icon: WifiOff, color: 'text-red-400' },
+            { label: 'Empresas RMM', value: stats.companiesWithRmm, icon: Building2, color: 'text-purple-400' },
+          ].map((s, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+              className="tm-bg-card border tm-border rounded-xl p-4"
+            >
+              <div className="flex items-center gap-3">
+                <s.icon size={20} className={s.color} />
+                <div>
+                  <p className="text-2xl font-bold tm-text">{s.value}</p>
+                  <p className="text-xs tm-text-secondary">{s.label}</p>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 tm-text-muted" />
+          <input
+            type="text"
+            placeholder="Buscar por hostname, usuário, IP..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 tm-bg-card border tm-border rounded-lg tm-text placeholder-gray-500 focus:outline-none focus:border-accent-blue/50 text-sm"
+          />
+        </div>
+        <select
+          value={filterCompany}
+          onChange={(e) => setFilterCompany(e.target.value)}
+          className="px-4 py-2.5 tm-bg-card border tm-border rounded-lg tm-text text-sm focus:outline-none focus:border-accent-blue/50"
+        >
+          <option value="">Todas as empresas</option>
+          {companies.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Machine List */}
+      <div className="tm-bg-card border tm-border rounded-xl overflow-hidden">
+        {filtered.length === 0 ? (
+          <div className="text-center py-16">
+            <Monitor size={48} className="mx-auto text-gray-600 mb-4" />
+            <p className="tm-text-secondary">Nenhuma máquina encontrada</p>
+            <p className="tm-text-muted text-sm mt-1">Instale o agente RMM nas máquinas para monitorar</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b tm-border">
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3">Status</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3">Hostname</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden md:table-cell">Usuário</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden lg:table-cell">S.O.</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden lg:table-cell">RAM</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden xl:table-cell">IP</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden lg:table-cell">TeamViewer</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3">Empresa</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden md:table-cell">Último Check-in</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((m, idx) => (
+                  <motion.tr
+                    key={m.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: idx * 0.02 }}
+                    className="border-b tm-border hover:tm-bg-card transition"
+                  >
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                        m.status === 'Ligado'
+                          ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                          : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                      }`}>
+                        {m.status === 'Ligado' ? <Wifi size={12} /> : <WifiOff size={12} />}
+                        {m.status === 'Ligado' ? 'Online' : 'Offline'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="tm-text font-medium text-sm">{m.hostname}</span>
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      <span className="tm-text text-sm">{m.username || '—'}</span>
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      <span className="tm-text-secondary text-xs">{m.os ? m.os.substring(0, 30) : '—'}</span>
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      <span className="tm-text text-sm">{m.ram || '—'}</span>
+                    </td>
+                    <td className="px-4 py-3 hidden xl:table-cell">
+                      <span className="tm-text-secondary text-xs font-mono">{m.ipAddress || '—'}</span>
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      {m.teamviewerId ? (
+                        <a
+                          href={`teamviewer10://control?device=${m.teamviewerId}`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 transition cursor-pointer"
+                          title={`Conectar via TeamViewer (ID: ${m.teamviewerId})`}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22.597 24H1.406A1.41 1.41 0 0 1 0 22.594V1.406A1.41 1.41 0 0 1 1.406 0h21.191A1.41 1.41 0 0 1 24 1.406v21.188A1.41 1.41 0 0 1 22.597 24zM4.95 11.953l6.036-6.037.967.968-5.069 5.069 5.069 5.069-.967.967-6.036-6.036zm7.1 0l6.036-6.037.967.968-5.069 5.069 5.069 5.069-.967.967-6.036-6.036z"/></svg>
+                          {m.teamviewerId}
+                        </a>
+                      ) : (
+                        <span className="text-xs tm-text-muted">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="tm-text text-sm">{m.company.name}</span>
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      <span className="tm-text-secondary text-xs">{formatDate(m.lastCheckin)}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <Link
+                          href={`/tickets/rmm/machine/${m.id}`}
+                          className="p-1.5 tm-text-secondary hover:text-accent-blue hover:tm-bg-card rounded-lg transition"
+                          title="Console / Detalhes"
+                        >
+                          <Terminal size={16} />
+                        </Link>
+                        {m.status !== 'Ligado' && (
+                          <button
+                            onClick={() => handleReactivateAgent(m.id)}
+                            disabled={reactivating === m.id}
+                            className="p-1.5 tm-text-secondary hover:text-orange-400 hover:tm-bg-card rounded-lg transition disabled:opacity-50"
+                            title="Reativar agente"
+                          >
+                            {reactivating === m.id ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDeleteMachine(m.id)}
+                            disabled={deleting === m.id}
+                            className="p-1.5 tm-text-secondary hover:text-red-400 hover:tm-bg-card rounded-lg transition disabled:opacity-50"
+                            title="Remover máquina"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </motion.tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

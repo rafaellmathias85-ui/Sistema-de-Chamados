@@ -1,0 +1,495 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
+import { Role } from '@prisma/client';
+import { getSession } from '@/lib/session';
+
+export const dynamic = 'force-dynamic';
+
+// GET - List appointments (filtered by date range, technicianId)
+export async function GET(request: NextRequest) {
+  try {
+    const session = await getSession();
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+
+    if (!['ADMIN', 'SUPPORT'].includes(session.user.role)) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const dateFrom = searchParams.get('dateFrom');
+    const dateTo = searchParams.get('dateTo');
+    const technicianId = searchParams.get('technicianId');
+    const ticketId = searchParams.get('ticketId');
+
+    const where: any = {};
+
+    if (dateFrom || dateTo) {
+      where.date = {};
+      if (dateFrom) where.date.gte = new Date(dateFrom);
+      if (dateTo) where.date.lte = new Date(dateTo + 'T23:59:59.999Z');
+    }
+
+    if (technicianId) {
+      where.technicianId = technicianId;
+    } else if (session.user.role === 'SUPPORT') {
+      // Support only sees own appointments
+      where.technicianId = session.user.id;
+    }
+
+    if (ticketId) {
+      where.ticketId = ticketId;
+    }
+
+    const appointments = await prisma.appointment.findMany({
+      where,
+      include: {
+        ticket: {
+          select: {
+            number: true,
+            subject: true,
+            company: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+    });
+
+    return NextResponse.json(appointments);
+  } catch (error) {
+    console.error('Error fetching appointments:', error);
+    return NextResponse.json({ error: 'Erro ao buscar agendamentos' }, { status: 500 });
+  }
+}
+
+// POST - Create appointment with conflict detection
+// Supports autoCreateTicket mode: creates ticket automatically for "Visita Técnica"
+export async function POST(request: NextRequest) {
+  try {
+    const session = await getSession();
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+
+    if (!['ADMIN', 'SUPPORT'].includes(session.user.role)) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    const body = await request.json();
+    const {
+      ticketId: existingTicketId,
+      autoCreateTicket,
+      companyId,
+      requesterName,
+      requesterEmail,
+      technicianId,
+      date,
+      startTime,
+      endTime,
+      observation,
+    } = body;
+
+    if (!technicianId || !date || !startTime || !endTime) {
+      return NextResponse.json({ error: 'Campos obrigatórios faltando' }, { status: 400 });
+    }
+
+    let ticketId = existingTicketId;
+
+    // Auto-create ticket flow
+    if (autoCreateTicket) {
+      if (!companyId) {
+        return NextResponse.json({ error: 'Empresa obrigatória para criar chamado' }, { status: 400 });
+      }
+
+      const company = await prisma.company.findUnique({ where: { id: companyId } });
+      if (!company) {
+        return NextResponse.json({ error: 'Empresa não encontrada' }, { status: 404 });
+      }
+
+      const dateStr = new Date(date).toLocaleDateString('pt-BR');
+      const ticket = await prisma.ticket.create({
+        data: {
+          subject: 'Visita Técnica',
+          description: `Visita técnica agendada para ${dateStr} das ${startTime} às ${endTime}.${requesterName ? `\nSolicitante: ${requesterName}` : ''}${requesterEmail ? ` (${requesterEmail})` : ''}${observation ? `\nObservação: ${observation}` : ''}`,
+          status: 'IN_PROGRESS',
+          priority: 'MEDIUM',
+          creatorId: session.user.id,
+          companyId: companyId,
+          assigneeId: technicianId,
+        },
+      });
+      ticketId = ticket.id;
+    }
+
+    if (!ticketId) {
+      return NextResponse.json({ error: 'ticketId ou autoCreateTicket obrigatório' }, { status: 400 });
+    }
+
+    // Validate ticket exists
+    const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true, number: true, subject: true, company: { select: { name: true } } } });
+    if (!ticket) {
+      return NextResponse.json({ error: 'Chamado não encontrado' }, { status: 404 });
+    }
+
+    // Get technician name
+    const tech = await prisma.user.findUnique({ where: { id: technicianId }, select: { name: true } });
+    if (!tech) {
+      return NextResponse.json({ error: 'Técnico não encontrado' }, { status: 404 });
+    }
+
+    // Conflict detection: check overlapping appointments for same technician on same date
+    const dateObj = new Date(date);
+    const startOfDay = new Date(dateObj);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(dateObj);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const existing = await prisma.appointment.findMany({
+      where: {
+        technicianId,
+        date: { gte: startOfDay, lte: endOfDay },
+      },
+    });
+
+    // Check time overlap
+    const newStart = startTime;
+    const newEnd = endTime;
+    const conflict = existing.find(appt => {
+      return (newStart < appt.endTime && newEnd > appt.startTime);
+    });
+
+    if (conflict) {
+      return NextResponse.json({
+        error: `Conflito de horário! Técnico já tem agendamento de ${conflict.startTime} às ${conflict.endTime} nesta data.`,
+        conflict: true,
+      }, { status: 409 });
+    }
+
+    const appointment = await prisma.appointment.create({
+      data: {
+        ticketId,
+        technicianId,
+        technicianName: tech.name,
+        date: startOfDay,
+        startTime,
+        endTime,
+        observation: observation || null,
+        companyId: companyId || null,
+        requesterName: requesterName || null,
+        requesterEmail: requesterEmail || null,
+        createdById: session.user.id,
+        createdByName: session.user.name || 'Usuário',
+      },
+      include: {
+        ticket: {
+          select: { number: true, subject: true, company: { select: { name: true } } },
+        },
+      },
+    });
+
+    // Log in ticket history
+    await prisma.ticketHistory.create({
+      data: {
+        ticketId,
+        action: 'appointment_created',
+        toValue: `${startTime}-${endTime} com ${tech.name}`,
+        note: `Visita técnica agendada para ${new Date(date).toLocaleDateString('pt-BR')}`,
+        userId: session.user.id,
+        userName: session.user.name || 'Usuário',
+        userRole: session.user.role as Role,
+      },
+    });
+
+    // Send confirmation email to requester
+    if (requesterEmail) {
+      try {
+        const { sendNotificationEmail } = await import('@/lib/notifications');
+        const dateStr = new Date(date).toLocaleDateString('pt-BR');
+        await sendNotificationEmail({
+          notificationId: process.env.NOTIF_ID_CONFIRMAO_VISITA_TCNICA || '',
+          recipientEmail: requesterEmail,
+          subject: `📅 Visita Técnica Confirmada - Chamado #${ticket.number}`,
+          body: getAppointmentConfirmationTemplate({
+            ticketNumber: ticket.number,
+            requesterName: requesterName || '',
+            technicianName: tech.name,
+            date: dateStr,
+            rawDate: date, // ISO or Date — para parse preciso na template
+            startTime,
+            endTime,
+            observation: observation || '',
+            companyName: ticket.company?.name || '',
+          }),
+        });
+      } catch (emailErr) {
+        console.error('Erro ao enviar email de confirmação:', emailErr);
+        // Não falha o agendamento se o email falhar
+      }
+    }
+
+    return NextResponse.json(appointment, { status: 201 });
+  } catch (error) {
+    console.error('Error creating appointment:', error);
+    return NextResponse.json({ error: 'Erro ao criar agendamento' }, { status: 500 });
+  }
+}
+
+function getAppointmentConfirmationTemplate(data: {
+  ticketNumber: number;
+  requesterName: string;
+  technicianName: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  observation: string;
+  companyName: string;
+  rawDate?: Date | string;
+}): string {
+  // Parse data real do agendamento para exibir no ícone de calendário
+  const rawDate = data.rawDate ? new Date(data.rawDate) : parseBrazilianDate(data.date);
+  const monthsShort = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+  const monthsLong = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+  const weekdaysLong = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+  const day = rawDate && !isNaN(rawDate.getTime()) ? rawDate.getUTCDate() : 0;
+  const monthShort = rawDate && !isNaN(rawDate.getTime()) ? monthsShort[rawDate.getUTCMonth()] : '';
+  const monthLong = rawDate && !isNaN(rawDate.getTime()) ? monthsLong[rawDate.getUTCMonth()] : '';
+  const year = rawDate && !isNaN(rawDate.getTime()) ? rawDate.getUTCFullYear() : '';
+  const weekday = rawDate && !isNaN(rawDate.getTime()) ? weekdaysLong[rawDate.getUTCDay()] : '';
+  const longDate = day ? `${weekday}, ${day} de ${monthLong} de ${year}` : data.date;
+
+  // Template com suporte robusto a Dark Mode em clientes de email
+  // - meta color-scheme para impedir inversao automatica
+  // - @media prefers-color-scheme: dark para Apple Mail / iOS
+  // - [data-ogsc] / [data-ogsb] para Outlook.com
+  // - Cabecalho com cor forte (laranja/azul) que sobrevive a inversao
+  return `
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light only" />
+  <title>Visita Técnica Confirmada</title>
+  <style>
+    /* Reset basico */
+    body, table, td, p, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table { border-collapse: collapse !important; }
+    body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+
+    /* Forcar light mode - evita inversao automatica do cliente */
+    :root { color-scheme: light only; supported-color-schemes: light only; }
+
+    /* Dark mode overrides para clientes que insistem em inverter */
+    @media (prefers-color-scheme: dark) {
+      .wti-header { background: #0A1628 !important; background-color: #0A1628 !important; }
+      .wti-header-title { color: #ffffff !important; }
+      .wti-header-subtitle { color: #cbd5e1 !important; }
+      .wti-header-kicker { color: #93c5fd !important; }
+      .wti-body { background: #ffffff !important; color: #0f172a !important; }
+      .wti-body p, .wti-body td, .wti-body span, .wti-body strong { color: #0f172a !important; }
+      .wti-card-bg { background: #f1f5f9 !important; }
+      .wti-footer { background: #0f172a !important; }
+      .wti-footer-text { color: #cbd5e1 !important; }
+      .wti-day { color: #0f172a !important; background: #ffffff !important; }
+      .wti-month { color: #ffffff !important; background: #dc2626 !important; }
+      .wti-year { color: #64748b !important; background: #f1f5f9 !important; }
+    }
+
+    /* Outlook.com (roundcube) */
+    [data-ogsc] .wti-header { background: #0A1628 !important; }
+    [data-ogsc] .wti-header-title { color: #ffffff !important; }
+    [data-ogsc] .wti-header-subtitle { color: #cbd5e1 !important; }
+    [data-ogsc] .wti-header-kicker { color: #93c5fd !important; }
+    [data-ogsc] .wti-footer-text { color: #cbd5e1 !important; }
+  </style>
+</head>
+<body style="margin:0;padding:0;background:#f8fafc;color-scheme:light only;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;">
+    <tr>
+      <td align="center" style="padding:20px 0;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+          <!-- Header com cor de marca forte (azul institucional) -->
+          <tr>
+            <td class="wti-header" bgcolor="#0A1628" style="background:#0A1628;background-color:#0A1628;padding:32px 20px;text-align:center;">
+              <!--[if mso]>
+              <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:600px;">
+                <v:fill type="solid" color="#0A1628" />
+                <v:textbox inset="0,0,0,0">
+              <![endif]-->
+              <div class="wti-header-kicker" style="color:#93c5fd;font-family:Arial,Helvetica,sans-serif;font-size:13px;letter-spacing:2px;font-weight:700;margin-bottom:8px;text-transform:uppercase;mso-line-height-rule:exactly;">
+                <font color="#93c5fd">Winner Tecnologia</font>
+              </div>
+              <h1 class="wti-header-title" style="color:#ffffff;margin:0;font-family:Arial,Helvetica,sans-serif;font-size:26px;font-weight:700;mso-line-height-rule:exactly;line-height:30px;">
+                <font color="#ffffff">📅 Visita Técnica Confirmada</font>
+              </h1>
+              <p class="wti-header-subtitle" style="color:#cbd5e1;margin:10px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;">
+                <font color="#cbd5e1">Chamado #${data.ticketNumber}</font>
+              </p>
+              <!--[if mso]>
+                </v:textbox>
+              </v:rect>
+              <![endif]-->
+            </td>
+          </tr>
+
+          <!-- Corpo -->
+          <tr>
+            <td class="wti-body" bgcolor="#ffffff" style="background:#ffffff;padding:30px;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+              <p style="color:#0f172a;font-size:15px;margin:0 0 12px 0;">
+                <font color="#0f172a">Olá${data.requesterName ? ` <strong>${data.requesterName}</strong>` : ''},</font>
+              </p>
+              <p style="color:#334155;font-size:15px;margin:0 0 20px 0;">
+                <font color="#334155">Sua visita técnica foi agendada com sucesso. Confira os detalhes abaixo:</font>
+              </p>
+
+              <!-- Data destacada com icone de calendario -->
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:18px 0 22px 0;">
+                <tr>
+                  <td style="width:110px;vertical-align:top;">
+                    <table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;border-radius:10px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);width:96px;">
+                      <tr>
+                        <td class="wti-month" bgcolor="#dc2626" style="background:#dc2626;color:#ffffff;text-align:center;padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:1px;">
+                          <font color="#ffffff">${monthShort || 'MÊS'}</font>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="wti-day" bgcolor="#ffffff" style="background:#ffffff;text-align:center;padding:14px 0;font-family:Arial,Helvetica,sans-serif;font-size:40px;font-weight:800;color:#0f172a;line-height:1;border:1px solid #e2e8f0;border-top:0;border-bottom:0;">
+                          <font color="#0f172a">${day || '—'}</font>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="wti-year" bgcolor="#f1f5f9" style="background:#f1f5f9;text-align:center;padding:4px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#64748b;border:1px solid #e2e8f0;border-top:0;">
+                          <font color="#64748b">${year || ''}</font>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td style="padding-left:18px;vertical-align:middle;">
+                    <div style="color:#64748b;font-family:Arial,Helvetica,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">
+                      <font color="#64748b">Data agendada</font>
+                    </div>
+                    <div style="color:#0f172a;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;line-height:1.3;">
+                      <font color="#0f172a">${longDate}</font>
+                    </div>
+                    <div style="color:#2563eb;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;margin-top:6px;">
+                      <font color="#2563eb">🕐 ${data.startTime} às ${data.endTime}</font>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Tabela detalhes -->
+              <table class="wti-card-bg" width="100%" cellpadding="0" cellspacing="0" role="presentation" bgcolor="#f1f5f9" style="background:#f1f5f9;border-radius:8px;border:1px solid #e2e8f0;margin:20px 0;">
+                <tr>
+                  <td style="padding:14px 20px;">
+                    <table width="100%" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;">
+                      <tr>
+                        <td style="padding:8px 0;border-bottom:1px solid #e2e8f0;color:#334155;font-size:14px;">
+                          <font color="#334155"><strong>👤 Técnico responsável:</strong></font>
+                        </td>
+                        <td style="padding:8px 0;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;font-size:14px;">
+                          <font color="#0f172a">${data.technicianName}</font>
+                        </td>
+                      </tr>
+                      ${data.companyName ? `
+                      <tr>
+                        <td style="padding:8px 0;border-bottom:1px solid #e2e8f0;color:#334155;font-size:14px;">
+                          <font color="#334155"><strong>🏢 Empresa:</strong></font>
+                        </td>
+                        <td style="padding:8px 0;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;font-size:14px;">
+                          <font color="#0f172a">${data.companyName}</font>
+                        </td>
+                      </tr>
+                      ` : ''}
+                      ${data.observation ? `
+                      <tr>
+                        <td style="padding:8px 0;color:#334155;vertical-align:top;font-size:14px;">
+                          <font color="#334155"><strong>📝 Observação:</strong></font>
+                        </td>
+                        <td style="padding:8px 0;text-align:right;color:#0f172a;white-space:pre-wrap;font-size:14px;">
+                          <font color="#0f172a">${data.observation}</font>
+                        </td>
+                      </tr>
+                      ` : ''}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="color:#64748b;font-family:Arial,Helvetica,sans-serif;font-size:13px;text-align:center;margin-top:24px;">
+                <font color="#64748b">Em caso de dúvidas ou necessidade de reagendamento, entre em contato conosco.</font>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td class="wti-footer" bgcolor="#0f172a" style="background:#0f172a;padding:18px;text-align:center;">
+              <p class="wti-footer-text" style="color:#cbd5e1;margin:0;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:500;">
+                <font color="#cbd5e1">Winner Tecnologia — Sistema de Chamados</font>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Converte uma string "dd/MM/yyyy" (formato pt-BR) em Date.
+ */
+function parseBrazilianDate(d: string): Date | null {
+  if (!d) return null;
+  const m = d.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return null;
+  return new Date(`${m[3]}-${m[2]}-${m[1]}T12:00:00Z`);
+}
+
+// DELETE - Remove appointment
+export async function DELETE(request: NextRequest) {
+  try {
+    const session = await getSession();
+    if (!session?.user || !['ADMIN', 'SUPPORT'].includes(session.user.role)) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
+
+    const appt = await prisma.appointment.findUnique({ where: { id } });
+    if (!appt) return NextResponse.json({ error: 'Não encontrado' }, { status: 404 });
+
+    // Support can only delete own appointments
+    if (session.user.role === 'SUPPORT' && appt.technicianId !== session.user.id) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    await prisma.appointment.delete({ where: { id } });
+
+    // Log in ticket history
+    await prisma.ticketHistory.create({
+      data: {
+        ticketId: appt.ticketId,
+        action: 'appointment_deleted',
+        fromValue: `${appt.startTime}-${appt.endTime} com ${appt.technicianName}`,
+        note: `Agendamento removido`,
+        userId: session.user.id,
+        userName: session.user.name || 'Usuário',
+        userRole: session.user.role as Role,
+      },
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('Error deleting appointment:', error);
+    return NextResponse.json({ error: 'Erro ao excluir agendamento' }, { status: 500 });
+  }
+}

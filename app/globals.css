@@ -1,0 +1,428 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=Lato:wght@300;400;700&display=swap');
+
+/* ═══ Theme Variables ═══ */
+:root {
+  --radius: 0.5rem;
+  /* Dark theme (default) */
+  --bg-main: #0f1623;
+  --bg-card: #1a2035;
+  --bg-card-hover: #1e2540;
+  --border-color: #2a3045;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --input-bg: #1a2035;
+  --input-border: #2a3045;
+  --input-text: #94a3b8;
+  --bar-track: #2a3045;
+  --hover-bg: rgba(255,255,255,0.05);
+  --badge-bg: rgba(255,255,255,0.08);
+  --modal-bg: #1a2035;
+  --modal-overlay: rgba(0,0,0,0.6);
+  --shadow-color: rgba(0,0,0,0.3);
+  --table-row-hover: rgba(255,255,255,0.03);
+  --scrollbar-track: #0f1623;
+  --scrollbar-thumb: #3B82F6;
+}
+
+.theme-light {
+  --bg-main: #f0f4f8;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8fafc;
+  --border-color: #e2e8f0;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --input-bg: #ffffff;
+  --input-border: #e2e8f0;
+  --input-text: #475569;
+  --bar-track: #e2e8f0;
+  --hover-bg: rgba(0,0,0,0.04);
+  --badge-bg: rgba(0,0,0,0.06);
+  --modal-bg: #ffffff;
+  --modal-overlay: rgba(0,0,0,0.3);
+  --shadow-color: rgba(0,0,0,0.1);
+  --table-row-hover: rgba(0,0,0,0.02);
+  --scrollbar-track: #f0f4f8;
+  --scrollbar-thumb: #3B82F6;
+}
+
+/* shadcn compat variables */
+:root {
+  --background: 222 47% 11%;
+  --foreground: 210 40% 98%;
+  --card: 222 47% 13%;
+  --card-foreground: 210 40% 98%;
+  --popover: 222 47% 11%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 222 47% 11%;
+  --secondary: 217 33% 17%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217 33% 17%;
+  --muted-foreground: 215 20% 65%;
+  --accent: 20 100% 60%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 63% 31%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217 33% 17%;
+  --input: 217 33% 17%;
+  --ring: 217 91% 60%;
+}
+
+.theme-light {
+  --background: 210 20% 96%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 217 91% 50%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 214 32% 91%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 20% 93%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 20 100% 55%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 32% 85%;
+  --input: 214 32% 85%;
+  --ring: 217 91% 50%;
+}
+
+[data-hydration-error] {
+  display: none !important;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Lato', sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+}
+.theme-light body,
+body.theme-light {
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Montserrat', sans-serif;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* ═══ Theme utility classes ═══ */
+.tm-bg-main { background-color: var(--bg-main) !important; }
+.tm-bg-card { background-color: var(--bg-card) !important; }
+.tm-border { border-color: var(--border-color) !important; }
+.tm-text { color: var(--text-primary) !important; }
+.tm-text-secondary { color: var(--text-secondary) !important; }
+.tm-text-muted { color: var(--text-muted) !important; }
+.tm-input {
+  background-color: var(--input-bg) !important;
+  border-color: var(--input-border) !important;
+  color: var(--input-text) !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2563eb;
+}
+
+/* Animated gradient border */
+.gradient-border {
+  background: linear-gradient(135deg, #3B82F6, #FF6B35);
+  padding: 1px;
+  border-radius: 0.5rem;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #3B82F6, #FF6B35);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Dark theme select/option elements */
+select {
+  background-color: var(--input-bg) !important;
+  color: var(--input-text);
+}
+select option {
+  background-color: var(--bg-card);
+  color: var(--input-text);
+}
+select option:checked {
+  background-color: #0e7490;
+  color: white;
+}
+
+/* Theme-aware inputs globally */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+textarea {
+  background-color: var(--input-bg);
+  border-color: var(--input-border);
+  color: var(--text-primary);
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"])::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+
+/* ═══ Theme Toggle Switch ═══ */
+.theme-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: #374151;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  border: none;
+  padding: 0;
+  flex-shrink: 0;
+}
+.theme-switch.light {
+  background: #3b82f6;
+}
+.theme-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+.theme-switch.light .theme-switch-knob {
+  transform: translateX(20px);
+}
+
+/* ═══ Light Mode Global Overrides ═══ */
+/* Fix hardcoded dark backgrounds used across pages */
+.theme-light .bg-\[\#0f172a\],
+.theme-light .bg-\[\#0A1628\],
+.theme-light .bg-\[\#0a1628\] {
+  background-color: var(--bg-main) !important;
+}
+.theme-light .bg-\[\#1a2332\],
+.theme-light .bg-\[\#1a2035\],
+.theme-light .bg-\[\#1a1a2e\] {
+  background-color: var(--bg-card) !important;
+}
+.theme-light .border-white\/10,
+.theme-light .border-white\/5 {
+  border-color: var(--border-color) !important;
+}
+
+/* Text readability in light mode */
+.theme-light .text-white {
+  color: var(--text-primary) !important;
+}
+.theme-light .text-white\/90,
+.theme-light .text-white\/80,
+.theme-light .text-white\/70 {
+  color: var(--text-primary) !important;
+}
+.theme-light .text-white\/60,
+.theme-light .text-white\/50 {
+  color: var(--text-secondary) !important;
+}
+.theme-light .text-gray-200,
+.theme-light .text-gray-300 {
+  color: var(--text-primary) !important;
+}
+.theme-light .text-gray-400,
+.theme-light .text-gray-500 {
+  color: var(--text-secondary) !important;
+}
+.theme-light .text-gray-600 {
+  color: var(--text-muted) !important;
+}
+.theme-light .text-gray-700 {
+  color: var(--text-muted) !important;
+}
+.theme-light .text-slate-200,
+.theme-light .text-slate-300 {
+  color: var(--text-primary) !important;
+}
+.theme-light .text-slate-400,
+.theme-light .text-slate-500 {
+  color: var(--text-secondary) !important;
+}
+
+/* Background fixes for common dark patterns */
+.theme-light .bg-white\/5,
+.theme-light .bg-white\/10,
+.theme-light .bg-white\/\[0\.03\],
+.theme-light .bg-white\/\[0\.05\] {
+  background-color: rgba(0,0,0,0.04) !important;
+}
+.theme-light .bg-slate-800,
+.theme-light .bg-slate-900 {
+  background-color: var(--bg-card) !important;
+}
+.theme-light .bg-slate-800\/50 {
+  background-color: var(--bg-card) !important;
+}
+.theme-light .bg-gray-800,
+.theme-light .bg-gray-900 {
+  background-color: var(--bg-card) !important;
+}
+
+/* Hover states */
+.theme-light .hover\:bg-white\/5:hover,
+.theme-light .hover\:bg-white\/10:hover,
+.theme-light .hover\:bg-white\/\[0\.05\]:hover {
+  background-color: rgba(0,0,0,0.06) !important;
+}
+
+/* Dividers */
+.theme-light .divide-white\/10 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border-color) !important;
+}
+
+/* Placeholder text */
+.theme-light .placeholder\:text-gray-500::placeholder,
+.theme-light .placeholder\:text-gray-600::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Ring/focus states */
+.theme-light .ring-white\/10,
+.theme-light .ring-white\/20 {
+  --tw-ring-color: var(--border-color) !important;
+}
+
+/* Sidebar & layout specific */
+.theme-light .bg-\[\#0A1628\]\/80 {
+  background-color: rgba(240,244,248,0.9) !important;
+}
+/* ============================================
+   Email Body Rendering (N-able / Kaseya style)
+   ============================================ */
+.email-body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  font-size: 14px;
+  line-height: 1.65;
+  color: #e2e8f0 !important;
+}
+/* Forcar cor clara em TODOS os descendentes do email body (sobrescreve color:black inline dos emails) */
+.email-body *,
+.email-body p,
+.email-body div,
+.email-body span,
+.email-body li,
+.email-body td,
+.email-body th,
+.email-body strong,
+.email-body b,
+.email-body em,
+.email-body i,
+.email-body u,
+.email-body small,
+.email-body label,
+.email-body font {
+  color: #e2e8f0 !important;
+}
+/* Neutralizar fundos brancos/claros de emails em modo escuro — wildcard agressivo */
+.email-body *:not(img) {
+  background-color: transparent !important;
+  background: transparent !important;
+}
+/* Imagens: remover fundo branco mas manter imagem visível */
+.email-body img {
+  background-color: transparent !important;
+}
+/* Bordas de tabelas em modo escuro */
+.email-body table[bgcolor],
+.email-body td[bgcolor],
+.email-body tr[bgcolor],
+.email-body th[bgcolor] {
+  background-color: transparent !important;
+}
+.email-body img { max-width: 100%; height: auto; border-radius: 4px; margin: 4px 0; }
+.email-body a, .email-body a * { color: #60a5fa !important; text-decoration: underline; }
+.email-body a:hover, .email-body a:hover * { color: #93c5fd !important; }
+.email-body table { max-width: 100%; border-collapse: collapse; margin: 8px 0; }
+.email-body table td, .email-body table th { padding: 6px 10px; border: 1px solid rgba(255,255,255,0.08); }
+.email-body blockquote { border-left: 3px solid rgba(255,255,255,0.15); margin: 8px 0; padding: 4px 12px; color: #cbd5e1 !important; font-style: normal; }
+.email-body blockquote * { color: #cbd5e1 !important; }
+.email-body pre { background: rgba(0,0,0,0.35); padding: 10px 12px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; color: #e2e8f0 !important; }
+.email-body pre, .email-body pre * { color: #e2e8f0 !important; }
+.email-body code { background: rgba(0,0,0,0.25); padding: 2px 4px; border-radius: 3px; font-size: 13px; color: #e2e8f0 !important; }
+.email-body h1, .email-body h2, .email-body h3, .email-body h4, .email-body h5, .email-body h6 { color: #f1f5f9 !important; margin-top: 10px; margin-bottom: 6px; font-weight: 600; }
+.email-body p { margin: 6px 0; }
+.email-body ul, .email-body ol { margin: 6px 0; padding-left: 22px; }
+.email-body hr { border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 12px 0; }
+.email-body .email-meta-header { font-size: 12.5px !important; }
+.email-body .email-meta-header div { margin: 2px 0; }
+/* Meta header has explicit colors set in the server-rendered html, restore them */
+.email-body .email-meta-header span[style*="color:#94a3b8"],
+.email-body .email-meta-header span[style*="color: #94a3b8"] { color: #94a3b8 !important; }
+.email-body .email-meta-header span[style*="color:#e2e8f0"],
+.email-body .email-meta-header span[style*="color: #e2e8f0"] { color: #e2e8f0 !important; }
+.email-body .email-meta-header div[style*="color:#60a5fa"],
+.email-body .email-meta-header div[style*="color: #60a5fa"] { color: #60a5fa !important; }
+.email-body .email-meta-header div[style*="color:#cbd5e1"],
+.email-body .email-meta-header div[style*="color: #cbd5e1"] { color: #cbd5e1 !important; }
+.email-body .email-meta-header div[style*="color:#f1f5f9"],
+.email-body .email-meta-header div[style*="color: #f1f5f9"] { color: #f1f5f9 !important; }
+
+/* Light theme overrides for email body */
+.theme-light .email-body { color: #0f172a !important; }
+.theme-light .email-body *,
+.theme-light .email-body p,
+.theme-light .email-body div,
+.theme-light .email-body span,
+.theme-light .email-body li,
+.theme-light .email-body td,
+.theme-light .email-body th,
+.theme-light .email-body strong,
+.theme-light .email-body b,
+.theme-light .email-body em,
+.theme-light .email-body i,
+.theme-light .email-body u,
+.theme-light .email-body small,
+.theme-light .email-body label,
+.theme-light .email-body font { color: #0f172a !important; }
+.theme-light .email-body a, .theme-light .email-body a * { color: #2563eb !important; }
+.theme-light .email-body blockquote { border-left-color: rgba(0,0,0,0.15); color: var(--text-muted); }
+.theme-light .email-body pre, .theme-light .email-body code { background: rgba(0,0,0,0.05); }
+.theme-light .email-body .email-meta-header {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+.theme-light .email-body .email-meta-header span[style*="color:#e2e8f0"] { color: #0f172a !important; }
+.theme-light .email-body .email-meta-header span[style*="color:#94a3b8"] { color: #475569 !important; }
+.theme-light .email-body .email-meta-header div[style*="color:#60a5fa"] { color: #1d4ed8 !important; }
