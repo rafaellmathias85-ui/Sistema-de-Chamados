@@ -1,0 +1,20 @@
+name: Deploy VPS
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy on VPS
+        run: |
+          cd /var/www/helpdesk/app
+          git fetch origin
+          git reset --hard origin/main
+          bash /var/www/helpdesk/deploy.sh
