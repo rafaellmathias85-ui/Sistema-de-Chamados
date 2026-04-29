@@ -26,15 +26,25 @@ yarn build
 
 echo "[Deploy] Reiniciando aplicação..."
 if command -v pm2 &> /dev/null; then
-  # Tenta os nomes comuns do processo PM2
-  pm2 restart winner-helpdesk 2>/dev/null \
-    || pm2 restart helpdesk 2>/dev/null \
-    || pm2 restart all 2>/dev/null \
-    || pm2 start yarn --name winner-helpdesk -- start
-  pm2 save 2>/dev/null
+  echo "[Deploy] Processos PM2 antes:"
+  pm2 list
+  pm2 describe winner-helpdesk 2>/dev/null | grep -E "(cwd|script|exec_mode)" || true
+  pm2 describe helpdesk 2>/dev/null | grep -E "(cwd|script|exec_mode)" || true
+  
+  # Parar e deletar processos antigos
+  pm2 delete winner-helpdesk 2>/dev/null || true
+  pm2 delete helpdesk 2>/dev/null || true
+  
+  # Recriar com diretório correto
+  cd "$APP_DIR"
+  pm2 start yarn --name winner-helpdesk --cwd "$APP_DIR" -- start
+  pm2 save
+  
+  echo "[Deploy] Processos PM2 após restart:"
+  pm2 list
 else
   echo "[Deploy] PM2 não encontrado. Tentando systemctl..."
-  sudo systemctl restart helpdesk 2>/dev/null || echo "[Deploy] AVISO: Não foi possível reiniciar o serviço automaticamente."
+  sudo systemctl restart helpdesk 2>/dev/null || echo "[Deploy] AVISO: Não foi possível reiniciar."
 fi
 
 echo "[Deploy] === DEPLOY CONCLUÍDO ==="
