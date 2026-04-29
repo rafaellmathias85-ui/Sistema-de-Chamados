@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Menu, X, Shield, Monitor } from 'lucide-react';
+import { Menu, X, Shield, Monitor, ExternalLink } from 'lucide-react';
 import Image from 'next/image';
 
 const navLinks = [
@@ -11,6 +11,7 @@ const navLinks = [
   { name: 'Serviços', href: '#servicos', type: 'anchor' as const },
   { name: 'Diferenciais', href: '#diferenciais', type: 'anchor' as const },
   { name: 'Acesso Remoto', href: '/acesso-remoto', type: 'link' as const },
+  { name: 'WNR-Audit', href: 'https://wnrtecnologia.com.br/wnr-audit', type: 'external' as const },
   { name: 'Contato', href: '#contato', type: 'anchor' as const },
 ];
 
@@ -26,6 +27,11 @@ export default function Header() {
 
   const handleNav = (href: string) => {
     setMobileOpen(false);
+    // Se for link externo, abrir em nova aba
+    if (href.startsWith('http')) {
+      if (typeof window !== 'undefined') window.open(href, '_blank', 'noopener,noreferrer');
+      return;
+    }
     // Se for rota interna, navega ate a pagina
     if (href.startsWith('/')) {
       if (typeof window !== 'undefined') window.location.href = href;
@@ -68,17 +74,19 @@ export default function Header() {
           <nav className="hidden lg:flex items-center gap-1">
             {navLinks?.map((link) => {
               const isAccess = link?.href === '/acesso-remoto';
+              const isExternal = link?.type === 'external';
               return (
                 <button
                   key={link?.href}
                   onClick={() => handleNav(link?.href ?? '#')}
                   className={
-                    isAccess
+                    isAccess || isExternal
                       ? 'px-4 py-2 text-sm font-semibold text-accent-blue hover:text-white hover:bg-accent-blue/20 rounded-md transition-all duration-200 flex items-center gap-1.5'
                       : 'px-4 py-2 text-sm font-medium text-gray-300 hover:text-white hover:bg-white/10 rounded-md transition-all duration-200'
                   }
                 >
                   {isAccess && <Monitor size={16} />}
+                  {isExternal && <ExternalLink size={16} />}
                   {link?.name}
                 </button>
               );
@@ -119,17 +127,19 @@ export default function Header() {
             <div className="max-w-[1200px] mx-auto px-4 py-4 flex flex-col gap-1">
               {navLinks?.map((link) => {
                 const isAccess = link?.href === '/acesso-remoto';
+                const isExternal = link?.type === 'external';
                 return (
                   <button
                     key={link?.href}
                     onClick={() => handleNav(link?.href ?? '#')}
                     className={
-                      isAccess
+                      isAccess || isExternal
                         ? 'text-left px-4 py-3 text-accent-blue font-semibold hover:text-white hover:bg-accent-blue/20 rounded-md transition-all flex items-center gap-2'
                         : 'text-left px-4 py-3 text-gray-300 hover:text-white hover:bg-white/10 rounded-md transition-all'
                     }
                   >
                     {isAccess && <Monitor size={18} />}
+                    {isExternal && <ExternalLink size={18} />}
                     {link?.name}
                   </button>
                 );
