@@ -26,7 +26,12 @@ yarn build
 
 echo "[Deploy] Reiniciando aplicação..."
 if command -v pm2 &> /dev/null; then
-  pm2 restart helpdesk 2>/dev/null || pm2 start yarn --name helpdesk -- start
+  # Tenta os nomes comuns do processo PM2
+  pm2 restart winner-helpdesk 2>/dev/null \
+    || pm2 restart helpdesk 2>/dev/null \
+    || pm2 restart all 2>/dev/null \
+    || pm2 start yarn --name winner-helpdesk -- start
+  pm2 save 2>/dev/null
 else
   echo "[Deploy] PM2 não encontrado. Tentando systemctl..."
   sudo systemctl restart helpdesk 2>/dev/null || echo "[Deploy] AVISO: Não foi possível reiniciar o serviço automaticamente."
