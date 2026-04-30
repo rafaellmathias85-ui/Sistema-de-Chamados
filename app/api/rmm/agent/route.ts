@@ -23,6 +23,11 @@ $COMPANY_TOKEN = "${companyToken}"
 $CHECKIN_INTERVAL = 60
 # ===========================================
 
+# Forcar TLS 1.2+ (obrigatorio para HTTPS em servidores com certificado moderno)
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13 } catch {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+}
+
 $LogFile = "C:\\ProgramData\\WinnerRMM\\rmm_agent.log"
 
 function Write-Log($msg) {
@@ -358,13 +363,26 @@ function Send-Snapshot($machineId) {
 
 function Send-Checkin($data) {
     $body = $data | ConvertTo-Json -Depth 3
-    $resp = Invoke-RestMethod -Uri "$API_URL/checkin" \`
-        -Method POST \`
-        -Body $body \`
-        -ContentType "application/json" \`
-        -TimeoutSec 15 \`
-        -ErrorAction Stop
-    return $resp
+    $maxRetries = 3
+    $retryDelay = 5
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        try {
+            $resp = Invoke-RestMethod -Uri "$API_URL/checkin" \`
+                -Method POST \`
+                -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
+                -ContentType "application/json; charset=utf-8" \`
+                -TimeoutSec 30 \`
+                -ErrorAction Stop
+            return $resp
+        } catch {
+            Write-Log "Checkin tentativa $attempt/$maxRetries falhou: $($_.Exception.Message)"
+            if ($attempt -lt $maxRetries) {
+                Start-Sleep -Seconds ($retryDelay * $attempt)
+            }
+        }
+    }
+    Write-Log "ERRO: Checkin falhou apos $maxRetries tentativas"
+    return $null
 }
 
 function Get-DesktopPath {
@@ -630,15 +648,24 @@ function Collect-SecurityEvents($machineId) {
 
 # === Loop Principal ===
 Write-Log "Agente RMM iniciado - Token: $($COMPANY_TOKEN.Substring(0,8))..."
+Write-Log "API URL: $API_URL"
 $machineId = $null
 $loopCount = 0
+$consecutiveFailures = 0
+
+# Forcar TLS 1.2 (necessario para HTTPS em VPS com certificado moderno)
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 
 while ($true) {
     try {
         $data = Collect-Data
         $resp = Send-Checkin $data
-        if ($resp.machine_id) {
+        if ($resp -and $resp.machine_id) {
             $machineId = $resp.machine_id
+            $consecutiveFailures = 0
+        } else {
+            $consecutiveFailures++
+            Write-Log "Checkin sem resposta (falha consecutiva #$consecutiveFailures)"
         }
         if ($machineId) {
             Check-Tasks $machineId
@@ -651,9 +678,17 @@ while ($true) {
         }
         $loopCount++
     } catch {
-        Write-Log "Erro no loop: $($_.Exception.Message)"
+        $consecutiveFailures++
+        Write-Log "Erro no loop (#$consecutiveFailures): $($_.Exception.Message)"
     }
-    Start-Sleep -Seconds $CHECKIN_INTERVAL
+    # Backoff: se muitas falhas consecutivas, esperar mais para nao sobrecarregar
+    if ($consecutiveFailures -gt 5) {
+        $waitTime = [Math]::Min($CHECKIN_INTERVAL * 2, 300)
+        Write-Log "Muitas falhas consecutivas, aguardando $($waitTime)s..."
+        Start-Sleep -Seconds $waitTime
+    } else {
+        Start-Sleep -Seconds $CHECKIN_INTERVAL
+    }
 }
 `;
 }
@@ -1198,7 +1233,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const apiUrl = (process.env.NEXTAUTH_URL || 'https://winner-tecnologia-si-aq2c13.abacusai.app') + '/api/rmm';
+    // Derivar URL da API a partir do request (funciona em qualquer ambiente: Abacus, VPS, etc.)
+    const forwardedHost = request.headers.get('x-forwarded-host');
+    const host = forwardedHost || request.headers.get('host') || '';
+    const proto = request.headers.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
+    const baseUrl = `${proto}://${host}`;
+    const apiUrl = (baseUrl || process.env.NEXTAUTH_URL || 'https://www.wticorp.com.br') + '/api/rmm';
     const safeName = company.name.replace(/[^a-zA-Z0-9]/g, '_');
 
     if (format === 'uninstall') {
