@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFileUrl } from '@/lib/s3';
+import { getStorageProvider } from '@/lib/storage';
 import { getSession } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'cloudStoragePath obrigatório' }, { status: 400 });
     }
 
-    const url = await getFileUrl(cloudStoragePath, isPublic !== false);
+    const storage = getStorageProvider();
+    const url = await storage.getUrl(cloudStoragePath, isPublic !== false);
     return NextResponse.json({ url });
   } catch (error) {
     console.error('Erro ao gerar URL:', error);

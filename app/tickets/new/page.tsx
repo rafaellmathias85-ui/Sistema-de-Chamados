@@ -224,46 +224,9 @@ export default function NewTicketPage() {
       setUploadingFile(true);
 
       try {
-        // 1. Get presigned URL
-        const presignedRes = await fetch('/api/upload/presigned', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fileName: file.name,
-            contentType: file.type || 'application/octet-stream',
-            isPublic: false,
-          }),
-        });
-
-        if (!presignedRes.ok) {
-          const errData = await presignedRes.json();
-          throw new Error(errData.error || 'Erro ao obter URL de upload');
-        }
-
-        const { uploadUrl, cloudStoragePath } = await presignedRes.json();
-
-        // 2. Upload to S3
-        const headers: Record<string, string> = {
-          'Content-Type': file.type || 'application/octet-stream',
-        };
-        // Check if content-disposition is in signed headers
-        try {
-          const urlObj = new URL(uploadUrl);
-          const signedHeaders = urlObj.searchParams.get('X-Amz-SignedHeaders') || '';
-          if (signedHeaders.includes('content-disposition')) {
-            headers['Content-Disposition'] = 'attachment';
-          }
-        } catch { /* ignore URL parse errors */ }
-
-        const uploadRes = await fetch(uploadUrl, {
-          method: 'PUT',
-          headers,
-          body: file,
-        });
-
-        if (!uploadRes.ok) {
-          throw new Error('Erro ao fazer upload do arquivo');
-        }
+        // 1-2. Upload do arquivo (S3 presigned ou local direct)
+        const { uploadFile } = await import('@/lib/upload-helper');
+        const { cloudStoragePath } = await uploadFile(file, false);
 
         // 3. Update attachment state with cloudStoragePath
         setAttachments(prev =>

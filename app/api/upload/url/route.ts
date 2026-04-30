@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getFileUrl } from '@/lib/s3';
+import { getStorageProvider } from '@/lib/storage';
 import { getSession } from '@/lib/session';
 
 export async function GET(request: NextRequest) {
@@ -19,7 +19,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Path obrigat\u00f3rio' }, { status: 400 });
     }
 
-    const url = await getFileUrl(path, isPublic);
+    const storage = getStorageProvider();
+    const url = await storage.getUrl(path, isPublic);
     return NextResponse.json({ url });
   } catch (error) {
     console.error('Error getting file URL:', error);

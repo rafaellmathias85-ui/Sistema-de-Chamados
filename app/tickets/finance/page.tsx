@@ -270,22 +270,8 @@ export default function FinancePage() {
 
     setUploadingNF(ticketId);
     try {
-      // Get presigned URL
-      const presignRes = await fetch('/api/upload/presigned', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: file.name, contentType: file.type, isPublic: false }),
-      });
-      if (!presignRes.ok) throw new Error('Erro ao obter URL de upload');
-      const { uploadUrl, cloudStoragePath } = await presignRes.json();
-
-      // Upload to S3
-      const uploadRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type, 'Content-Disposition': 'attachment' },
-        body: file,
-      });
-      if (!uploadRes.ok) throw new Error('Erro ao fazer upload');
+      const { uploadFile } = await import('@/lib/upload-helper');
+      const { cloudStoragePath } = await uploadFile(file, false);
 
       // Save NF path on ticket
       const patchRes = await fetch(`/api/tickets/${ticketId}`, {
@@ -308,24 +294,12 @@ export default function FinancePage() {
 
     setUploadingNF(ticketId);
     try {
-      // Delete old NF from S3
+      // Delete old NF
       await fetch(`/api/tickets/${ticketId}/nf`, { method: 'DELETE' });
 
       // Upload new
-      const presignRes = await fetch('/api/upload/presigned', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: file.name, contentType: file.type, isPublic: false }),
-      });
-      if (!presignRes.ok) throw new Error('Erro ao obter URL de upload');
-      const { uploadUrl, cloudStoragePath } = await presignRes.json();
-
-      const uploadRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type, 'Content-Disposition': 'attachment' },
-        body: file,
-      });
-      if (!uploadRes.ok) throw new Error('Erro ao fazer upload');
+      const { uploadFile } = await import('@/lib/upload-helper');
+      const { cloudStoragePath } = await uploadFile(file, false);
 
       const patchRes = await fetch(`/api/tickets/${ticketId}`, {
         method: 'PATCH',

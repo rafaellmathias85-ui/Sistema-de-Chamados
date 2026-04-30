@@ -166,41 +166,9 @@ export default function TicketDetailPage() {
 
     setUploading(true);
     try {
-      // 1. Obter URL de upload
-      const presignedRes = await fetch('/api/upload/presigned', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: file.name,
-          contentType: file.type,
-          isPublic: false,
-        }),
-      });
-
-      if (!presignedRes.ok) {
-        const err = await presignedRes.json();
-        throw new Error(err.error || 'Erro ao obter URL de upload');
-      }
-
-      const { uploadUrl, cloudStoragePath } = await presignedRes.json();
-
-      // 2. Verificar se precisa incluir Content-Disposition
-      const signedHeaders = new URL(uploadUrl).searchParams.get('X-Amz-SignedHeaders') || '';
-      const headers: Record<string, string> = { 'Content-Type': file.type };
-      if (signedHeaders.includes('content-disposition')) {
-        headers['Content-Disposition'] = 'attachment';
-      }
-
-      // 3. Upload direto para S3
-      const uploadRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers,
-        body: file,
-      });
-
-      if (!uploadRes.ok) {
-        throw new Error('Erro ao fazer upload do arquivo');
-      }
+      // 1-3. Upload do arquivo (S3 presigned ou local direct)
+      const { uploadFile } = await import('@/lib/upload-helper');
+      const { cloudStoragePath } = await uploadFile(file, false);
 
       // 4. Registrar anexo no ticket
       const attachRes = await fetch(`/api/tickets/${params.id}/attachments`, {

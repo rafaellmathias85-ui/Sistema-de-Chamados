@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getFileUrl } from '@/lib/s3';
+import { getStorageProvider } from '@/lib/storage';
 import { getSession } from '@/lib/session';
 
 export async function GET(
@@ -24,8 +24,8 @@ export async function GET(
       return NextResponse.json({ error: 'Nota fiscal não encontrada' }, { status: 404 });
     }
 
-    // Generate a presigned URL for viewing (not downloading)
-    const url = await getFileUrl(ticket.notaFiscalPath, false);
+    const storage = getStorageProvider();
+    const url = await storage.getUrl(ticket.notaFiscalPath);
 
     return NextResponse.json({ url });
   } catch (error) {

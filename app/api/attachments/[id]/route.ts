@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { getStorageProvider, isLocalPath } from '@/lib/storage';
-import { getFileUrl } from '@/lib/s3';
 import mime from 'mime-types';
 
 export const dynamic = 'force-dynamic';
@@ -69,8 +68,9 @@ export async function GET(
       });
     }
 
-    // --- Provider S3 ---
-    const signedUrl = await getFileUrl(cloudStoragePath, attachment.isPublic);
+    // --- Provider S3 (ou qualquer outro via StorageProvider) ---
+    const storage = getStorageProvider();
+    const signedUrl = await storage.getUrl(cloudStoragePath);
     return NextResponse.redirect(signedUrl, 302);
 
   } catch (error) {

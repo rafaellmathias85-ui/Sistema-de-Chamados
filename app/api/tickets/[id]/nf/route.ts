@@ -2,10 +2,10 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getFileUrl, deleteFile } from '@/lib/s3';
+import { getStorageProvider } from '@/lib/storage';
 import { getSession } from '@/lib/session';
 
-// GET — gerar URL assinada para visualizar a NF
+// GET — gerar URL para visualizar a NF
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -25,18 +25,8 @@ export async function GET(
       return NextResponse.json({ error: 'Nota fiscal não encontrada' }, { status: 404 });
     }
 
-    // Generate signed URL for inline viewing (not forced download)
-    const { GetObjectCommand } = await import('@aws-sdk/client-s3');
-    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
-    const { createS3Client, getBucketConfig } = await import('@/lib/aws-config');
-    const { bucketName } = getBucketConfig();
-    const s3 = createS3Client();
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: ticket.notaFiscalPath,
-      ResponseContentDisposition: 'inline',
-    });
-    const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
+    const storage = getStorageProvider();
+    const url = await storage.getUrl(ticket.notaFiscalPath, false);
     return NextResponse.json({ url });
   } catch (error) {
     console.error('Erro ao obter URL da NF:', error);
@@ -44,7 +34,7 @@ export async function GET(
   }
 }
 
-// DELETE — remover NF do S3 e limpar campo no banco
+// DELETE — remover NF e limpar campo no banco
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -64,11 +54,12 @@ export async function DELETE(
       return NextResponse.json({ error: 'Nota fiscal não encontrada' }, { status: 404 });
     }
 
-    // Delete from S3
+    // Delete from storage
     try {
-      await deleteFile(ticket.notaFiscalPath);
-    } catch (s3Err) {
-      console.error('Erro ao deletar arquivo do S3 (continuando):', s3Err);
+      const storage = getStorageProvider();
+      await storage.delete(ticket.notaFiscalPath);
+    } catch (storageErr) {
+      console.error('Erro ao deletar arquivo do storage (continuando):', storageErr);
     }
 
     // Clear from DB
