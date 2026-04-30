@@ -65,11 +65,12 @@ export default function AgendaPage() {
 
   const isAdmin = session?.user?.role === 'ADMIN';
   const isSupport = session?.user?.role === 'SUPPORT';
+  const isFinance = session?.user?.role === 'FINANCE';
 
   useEffect(() => {
     if (status === 'unauthenticated') router.push('/login');
     else if (status === 'authenticated') {
-      if (!['ADMIN', 'SUPPORT'].includes(session?.user?.role || '')) router.push('/tickets');
+      if (!['ADMIN', 'SUPPORT', 'FINANCE'].includes(session?.user?.role || '')) router.push('/tickets');
       else {
         loadSupportUsers();
       }
@@ -271,8 +272,8 @@ export default function AgendaPage() {
         </button>
       </div>
 
-      {/* Technician filter (admin only) */}
-      {isAdmin && (
+      {/* Technician filter (admin + finance) */}
+      {(isAdmin || isFinance) && (
         <div className="flex items-center gap-3">
           <User size={18} className="tm-text-secondary" />
           <select value={techFilter} onChange={(e) => setTechFilter(e.target.value)} className="tm-bg-card border tm-border rounded-lg px-4 py-2 tm-text text-sm">
@@ -462,7 +463,7 @@ export default function AgendaPage() {
               )}
 
               {/* Technician select */}
-              {isAdmin && (
+              {(isAdmin || isFinance) && (
                 <div>
                   <label className="flex items-center gap-1.5 text-sm tm-text mb-1">
                     <User size={14} className="text-orange-400" /> Técnico <span className="text-red-400">*</span>
@@ -509,7 +510,7 @@ export default function AgendaPage() {
               <button onClick={() => { setShowNewModal(false); setNewError(''); }} className="px-4 py-2 tm-text-secondary hover:tm-text">Cancelar</button>
               <button
                 onClick={createAppointment}
-                disabled={savingNew || !newForm.companyId || !newForm.date || (isAdmin && !newForm.technicianId)}
+                disabled={savingNew || !newForm.companyId || !newForm.date || ((isAdmin || isFinance) && !newForm.technicianId)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 flex items-center gap-2"
               >
                 {savingNew ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Plus size={16} />}

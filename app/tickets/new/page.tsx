@@ -356,12 +356,17 @@ export default function NewTicketPage() {
       // Create appointment for Visita Técnica
       if (isVisitaTecnica && visitTechId && visitDate) {
         try {
+          // Buscar email/nome do solicitante selecionado
+          const selectedUser = users.find(u => u.id === selectedCreatorId);
           await fetch('/api/appointments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               ticketId,
               technicianId: visitTechId,
+              companyId: selectedCompanyId || undefined,
+              requesterName: selectedUser?.name || session?.user?.name || '',
+              requesterEmail: selectedUser?.email || session?.user?.email || '',
               date: visitDate,
               startTime: visitStartTime,
               endTime: visitEndTime,

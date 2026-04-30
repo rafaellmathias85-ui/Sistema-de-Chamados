@@ -300,6 +300,7 @@ export async function notifyNewTicket(data: {
   creatorEmail: string;
   companyName: string;
   ticketUrl: string;
+  ccEmails?: string[];
 }): Promise<boolean> {
   const config = await getEmailConfig();
   
@@ -308,12 +309,139 @@ export async function notifyNewTicket(data: {
     return true;
   }
 
-  return sendNotificationEmail({
+  // 1. Enviar para equipe de suporte
+  await sendNotificationEmail({
     notificationId: process.env.NOTIF_ID_NOVO_CHAMADO || process.env.NOTIF_ID_NOVO_CHAMADO_CRIADO || '',
     recipientEmail: config.supportEmail,
     subject: `🎫 Novo Chamado #${data.ticketNumber} - ${data.subject}`,
     body: getNewTicketEmailTemplate(data),
   });
+
+  // 2. Enviar confirmação para o cliente (criador do chamado)
+  if (data.creatorEmail) {
+    try {
+      await sendNotificationEmail({
+        notificationId: process.env.NOTIF_ID_NOVO_CHAMADO || process.env.NOTIF_ID_NOVO_CHAMADO_CRIADO || '',
+        recipientEmail: data.creatorEmail,
+        subject: `🎫 Chamado #${data.ticketNumber} Aberto - ${data.subject}`,
+        body: getClientTicketConfirmationTemplate(data),
+      });
+      console.log(`[Notificação] Email de confirmação enviado para cliente: ${data.creatorEmail}`);
+    } catch (err) {
+      console.error('[Notificação] Erro ao enviar email de confirmação ao cliente:', err);
+    }
+  }
+
+  // 3. Enviar para emails CC adicionais
+  if (data.ccEmails && data.ccEmails.length > 0) {
+    for (const ccEmail of data.ccEmails) {
+      try {
+        await sendNotificationEmail({
+          notificationId: process.env.NOTIF_ID_NOVO_CHAMADO || process.env.NOTIF_ID_NOVO_CHAMADO_CRIADO || '',
+          recipientEmail: ccEmail,
+          subject: `🎫 Chamado #${data.ticketNumber} Aberto - ${data.subject}`,
+          body: getClientTicketConfirmationTemplate(data),
+        });
+        console.log(`[Notificação] Email CC enviado para: ${ccEmail}`);
+      } catch (err) {
+        console.error(`[Notificação] Erro ao enviar email CC para ${ccEmail}:`, err);
+      }
+    }
+  }
+
+  return true;
+}
+
+// Template de confirmação para o cliente quando o chamado é aberto
+function getClientTicketConfirmationTemplate(data: {
+  ticketNumber: number;
+  subject: string;
+  description: string;
+  priority: string;
+  creatorName: string;
+  companyName: string;
+  ticketUrl: string;
+}): string {
+  const priorityLabels: Record<string, string> = {
+    LOW: 'Baixa',
+    MEDIUM: 'Média',
+    HIGH: 'Alta',
+    CRITICAL: 'Crítica',
+  };
+
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8fafc;">
+      <div style="background: linear-gradient(135deg, #0A1628 0%, #1E3A5F 100%); padding: 30px; text-align: center;">
+        <p style="color: #93c5fd; font-size: 13px; letter-spacing: 2px; font-weight: 700; margin: 0 0 8px 0; text-transform: uppercase;">Winner Tecnologia</p>
+        <h1 style="color: white; margin: 0; font-size: 24px;">✅ Chamado #${data.ticketNumber} Registrado</h1>
+      </div>
+      <div style="padding: 30px; background: white;">
+        <p style="color: #334155; font-size: 15px; margin: 0 0 16px 0;">
+          Olá <strong>${data.creatorName}</strong>,
+        </p>
+        <p style="color: #334155; font-size: 15px; margin: 0 0 20px 0;">
+          Seu chamado foi registrado com sucesso. Nossa equipe já foi notificada e entrará em contato em breve.
+        </p>
+        
+        <div style="background: #f1f5f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">
+                <strong style="color: #64748b;">Número:</strong>
+              </td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #2563eb;">
+                #${data.ticketNumber}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">
+                <strong style="color: #64748b;">Assunto:</strong>
+              </td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; text-align: right; color: #1e293b;">
+                ${data.subject}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">
+                <strong style="color: #64748b;">Prioridade:</strong>
+              </td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; text-align: right; color: #1e293b;">
+                ${priorityLabels[data.priority] || data.priority}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0;">
+                <strong style="color: #64748b;">Empresa:</strong>
+              </td>
+              <td style="padding: 8px 0; text-align: right; color: #1e293b;">
+                ${data.companyName}
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #3B82F6; margin: 20px 0;">
+          <p style="color: #64748b; font-size: 12px; margin: 0 0 6px 0; font-weight: bold;">Descrição:</p>
+          <p style="color: #1e293b; margin: 0; white-space: pre-wrap; font-size: 14px;">${data.description.substring(0, 500)}${data.description.length > 500 ? '...' : ''}</p>
+        </div>
+        
+        <div style="text-align: center; margin-top: 30px;">
+          <a href="${data.ticketUrl}" style="background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%); color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">
+            Acompanhar Chamado
+          </a>
+        </div>
+
+        <p style="color: #94a3b8; font-size: 12px; text-align: center; margin-top: 20px;">
+          Você receberá atualizações por email sempre que houver progresso no seu chamado.
+        </p>
+      </div>
+      <div style="background: #1e293b; padding: 20px; text-align: center;">
+        <p style="color: #94a3b8; margin: 0; font-size: 12px;">
+          Winner Tecnologia - Sistema de Chamados
+        </p>
+      </div>
+    </div>
+  `;
 }
 
 // Função auxiliar para enviar notificação de atualização de status

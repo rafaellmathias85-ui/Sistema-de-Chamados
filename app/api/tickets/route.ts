@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
 
-    const { subject, description, priority, categoryId, creatorId: reqCreatorId, companyId: reqCompanyId } = await request.json();
+    const { subject, description, priority, categoryId, creatorId: reqCreatorId, companyId: reqCompanyId, ccEmails } = await request.json();
 
     if (!subject || !description) {
       return NextResponse.json(
@@ -221,6 +221,7 @@ export async function POST(request: NextRequest) {
         creatorEmail: ticket.creator.email || '',
         companyName: ticket.company.name,
         ticketUrl,
+        ccEmails: Array.isArray(ccEmails) ? ccEmails : undefined,
       });
     } catch (notifyError) {
       console.error('Erro ao enviar notificação de novo chamado:', notifyError);

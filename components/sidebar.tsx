@@ -131,7 +131,7 @@ export default function Sidebar({ user }: SidebarProps) {
         allNavItems[6],  // AI Chat - sempre
         ...((isAdmin || isFinance) ? [allNavItems[7]] : []),  // Financeiro (oculto para SUPPORT)
         ...(isStaff ? [allNavItems[8]] : []),  // Relatórios
-        ...((isAdmin || isSupport) ? [allNavItems[9]] : []),  // Agenda
+        ...((isAdmin || isSupport || isFinance) ? [allNavItems[9]] : []),  // Agenda
         ...(isAdmin ? [allNavItems[10]] : []),  // Telemetria
         allNavItems[11],  // Segurança - sempre
         ...(isAdmin ? [allNavItems[12], allNavItems[13], allNavItems[14]] : []),

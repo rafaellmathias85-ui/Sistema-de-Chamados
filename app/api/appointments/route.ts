@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
 
-    if (!['ADMIN', 'SUPPORT'].includes(session.user.role)) {
+    if (!['ADMIN', 'SUPPORT', 'FINANCE'].includes(session.user.role)) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
     }
 
@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
       // Support only sees own appointments
       where.technicianId = session.user.id;
     }
+    // FINANCE e ADMIN veem todos os agendamentos (sem filtro de technicianId)
 
     if (ticketId) {
       where.ticketId = ticketId;
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
 
-    if (!['ADMIN', 'SUPPORT'].includes(session.user.role)) {
+    if (!['ADMIN', 'SUPPORT', 'FINANCE'].includes(session.user.role)) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
     }
 
@@ -201,31 +202,55 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Send confirmation email to requester
+    // Send confirmation emails
+    const dateStr = new Date(date).toLocaleDateString('pt-BR');
+    const templateData = {
+      ticketNumber: ticket.number,
+      requesterName: requesterName || '',
+      technicianName: tech.name,
+      date: dateStr,
+      rawDate: date,
+      startTime,
+      endTime,
+      observation: observation || '',
+      companyName: ticket.company?.name || '',
+    };
+
+    // 1. Email para o solicitante/cliente
     if (requesterEmail) {
       try {
         const { sendNotificationEmail } = await import('@/lib/notifications');
-        const dateStr = new Date(date).toLocaleDateString('pt-BR');
         await sendNotificationEmail({
           notificationId: process.env.NOTIF_ID_CONFIRMAO_VISITA_TCNICA || '',
           recipientEmail: requesterEmail,
           subject: `📅 Visita Técnica Confirmada - Chamado #${ticket.number}`,
-          body: getAppointmentConfirmationTemplate({
-            ticketNumber: ticket.number,
-            requesterName: requesterName || '',
-            technicianName: tech.name,
-            date: dateStr,
-            rawDate: date, // ISO or Date — para parse preciso na template
-            startTime,
-            endTime,
-            observation: observation || '',
-            companyName: ticket.company?.name || '',
+          body: getAppointmentConfirmationTemplate(templateData),
+        });
+        console.log(`[Visita] Email de confirmação enviado para cliente: ${requesterEmail}`);
+      } catch (emailErr) {
+        console.error('Erro ao enviar email de confirmação ao cliente:', emailErr);
+      }
+    }
+
+    // 2. Email para o técnico responsável
+    try {
+      const techUser = await prisma.user.findUnique({ where: { id: technicianId }, select: { email: true } });
+      if (techUser?.email) {
+        const { sendNotificationEmail } = await import('@/lib/notifications');
+        await sendNotificationEmail({
+          notificationId: process.env.NOTIF_ID_CONFIRMAO_VISITA_TCNICA || '',
+          recipientEmail: techUser.email,
+          subject: `🔧 Visita Técnica Atribuída - Chamado #${ticket.number}`,
+          body: getTechnicianAppointmentTemplate({
+            ...templateData,
+            techEmail: techUser.email,
+            requesterEmail: requesterEmail || '',
           }),
         });
-      } catch (emailErr) {
-        console.error('Erro ao enviar email de confirmação:', emailErr);
-        // Não falha o agendamento se o email falhar
+        console.log(`[Visita] Email de agendamento enviado para técnico: ${techUser.email}`);
       }
+    } catch (emailErr) {
+      console.error('Erro ao enviar email para técnico:', emailErr);
     }
 
     return NextResponse.json(appointment, { status: 201 });
@@ -452,11 +477,113 @@ function parseBrazilianDate(d: string): Date | null {
   return new Date(`${m[3]}-${m[2]}-${m[1]}T12:00:00Z`);
 }
 
+// Template de email para o técnico sobre visita atribuída
+function getTechnicianAppointmentTemplate(data: {
+  ticketNumber: number;
+  requesterName: string;
+  requesterEmail: string;
+  technicianName: string;
+  techEmail: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  observation: string;
+  companyName: string;
+  rawDate?: Date | string;
+}): string {
+  const rawDate = data.rawDate ? new Date(data.rawDate) : parseBrazilianDate(data.date);
+  const weekdaysLong = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+  const monthsLong = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+  const day = rawDate && !isNaN(rawDate.getTime()) ? rawDate.getUTCDate() : 0;
+  const monthLong = rawDate && !isNaN(rawDate.getTime()) ? monthsLong[rawDate.getUTCMonth()] : '';
+  const year = rawDate && !isNaN(rawDate.getTime()) ? rawDate.getUTCFullYear() : '';
+  const weekday = rawDate && !isNaN(rawDate.getTime()) ? weekdaysLong[rawDate.getUTCDay()] : '';
+  const longDate = day ? `${weekday}, ${day} de ${monthLong} de ${year}` : data.date;
+
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8fafc;">
+      <div style="background: linear-gradient(135deg, #0A1628 0%, #1E3A5F 100%); padding: 30px; text-align: center;">
+        <p style="color: #93c5fd; font-size: 13px; letter-spacing: 2px; font-weight: 700; margin: 0 0 8px 0; text-transform: uppercase;">Winner Tecnologia</p>
+        <h1 style="color: white; margin: 0; font-size: 24px;">🔧 Visita Técnica Atribuída</h1>
+        <p style="color: #cbd5e1; margin: 10px 0 0 0; font-size: 14px;">Chamado #${data.ticketNumber}</p>
+      </div>
+      <div style="padding: 30px; background: white;">
+        <p style="color: #334155; font-size: 15px; margin: 0 0 16px 0;">
+          Olá <strong>${data.technicianName}</strong>,
+        </p>
+        <p style="color: #334155; font-size: 15px; margin: 0 0 20px 0;">
+          Uma visita técnica foi atribuída a você. Confira os detalhes:
+        </p>
+        
+        <div style="background: #f1f5f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">
+                <strong style="color: #64748b;">📅 Data:</strong>
+              </td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; text-align: right; color: #1e293b; font-weight: bold;">
+                ${longDate}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">
+                <strong style="color: #64748b;">🕐 Horário:</strong>
+              </td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; text-align: right; color: #2563eb; font-weight: bold;">
+                ${data.startTime} às ${data.endTime}
+              </td>
+            </tr>
+            ${data.companyName ? `
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">
+                <strong style="color: #64748b;">🏢 Empresa:</strong>
+              </td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; text-align: right; color: #1e293b;">
+                ${data.companyName}
+              </td>
+            </tr>
+            ` : ''}
+            ${data.requesterName ? `
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">
+                <strong style="color: #64748b;">👤 Solicitante:</strong>
+              </td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; text-align: right; color: #1e293b;">
+                ${data.requesterName}${data.requesterEmail ? ` (${data.requesterEmail})` : ''}
+              </td>
+            </tr>
+            ` : ''}
+            ${data.observation ? `
+            <tr>
+              <td style="padding: 8px 0;">
+                <strong style="color: #64748b;">📝 Observação:</strong>
+              </td>
+              <td style="padding: 8px 0; text-align: right; color: #1e293b;">
+                ${data.observation}
+              </td>
+            </tr>
+            ` : ''}
+          </table>
+        </div>
+
+        <p style="color: #94a3b8; font-size: 12px; text-align: center; margin-top: 20px;">
+          Confirme sua disponibilidade e prepare-se para o atendimento.
+        </p>
+      </div>
+      <div style="background: #1e293b; padding: 20px; text-align: center;">
+        <p style="color: #94a3b8; margin: 0; font-size: 12px;">
+          Winner Tecnologia - Sistema de Chamados
+        </p>
+      </div>
+    </div>
+  `;
+}
+
 // DELETE - Remove appointment
 export async function DELETE(request: NextRequest) {
   try {
     const session = await getSession();
-    if (!session?.user || !['ADMIN', 'SUPPORT'].includes(session.user.role)) {
+    if (!session?.user || !['ADMIN', 'SUPPORT', 'FINANCE'].includes(session.user.role)) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
     }
 
