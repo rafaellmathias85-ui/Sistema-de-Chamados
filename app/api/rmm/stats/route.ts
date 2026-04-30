@@ -12,11 +12,12 @@ export async function GET() {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
 
-    const threeMinAgo = new Date(Date.now() - 10 * 60 * 1000);
+    // Threshold consistente com /api/rmm/machines: 10 minutos
+    const onlineThreshold = new Date(Date.now() - 10 * 60 * 1000);
 
     const [totalMachines, onlineMachines, totalTasks, pendingTasks, companiesWithRmm] = await Promise.all([
       prisma.rmmMachine.count(),
-      prisma.rmmMachine.count({ where: { lastCheckin: { gte: threeMinAgo } } }),
+      prisma.rmmMachine.count({ where: { lastCheckin: { gte: onlineThreshold } } }),
       prisma.rmmTask.count(),
       prisma.rmmTask.count({ where: { status: 'PENDING' } }),
       prisma.company.count({ where: { rmmToken: { not: null } } }),

@@ -29,12 +29,14 @@ export async function GET(request: NextRequest) {
       orderBy: [{ status: 'asc' }, { lastCheckin: 'desc' }],
     });
 
-    // Marcar máquinas sem check-in há mais de 5 minutos como offline
-    // (agente envia heartbeat a cada 60s + retries; 5 min = ~5 tentativas perdidas)
+    // Determinar status online/offline baseado em lastCheckin
+    // Agente envia heartbeat a cada 60s; threshold de 10 min = ~10 tentativas perdidas
+    // Tolerância maior evita falsos "Offline" por latência, alta carga ou timeout temporário
+    const ONLINE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutos
     const now = new Date();
     const machinesWithStatus = machines.map((m: any) => {
       const lastCheckin = m.lastCheckin ? new Date(m.lastCheckin) : null;
-      const isOnline = lastCheckin && (now.getTime() - lastCheckin.getTime()) < 5 * 60 * 1000;
+      const isOnline = lastCheckin && (now.getTime() - lastCheckin.getTime()) < ONLINE_THRESHOLD_MS;
       return {
         ...m,
         status: isOnline ? 'Ligado' : 'Offline',

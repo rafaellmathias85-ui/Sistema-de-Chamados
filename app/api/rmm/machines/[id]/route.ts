@@ -30,10 +30,11 @@ export async function GET(
       return NextResponse.json({ error: 'Máquina não encontrada' }, { status: 404 });
     }
 
-    // Calcular status online/offline baseado no último check-in (5 minutos)
+    // Determinar status online/offline baseado em lastCheckin (threshold: 10 min)
+    const ONLINE_THRESHOLD_MS = 10 * 60 * 1000;
     const now = new Date();
     const lastCheckin = machine.lastCheckin ? new Date(machine.lastCheckin) : null;
-    const isOnline = lastCheckin && (now.getTime() - lastCheckin.getTime()) < 5 * 60 * 1000;
+    const isOnline = lastCheckin && (now.getTime() - lastCheckin.getTime()) < ONLINE_THRESHOLD_MS;
 
     return NextResponse.json({
       ...machine,
