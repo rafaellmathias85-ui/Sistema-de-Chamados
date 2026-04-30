@@ -18,6 +18,13 @@ async function main() {
       },
     });
     console.log('Default tenant created:', defaultTenant.id);
+  } else if (defaultTenant.name !== 'Winner Tecnologia') {
+    // Corrigir nome do tenant se estiver incorreto
+    defaultTenant = await prisma.tenant.update({
+      where: { id: defaultTenant.id },
+      data: { name: 'Winner Tecnologia' },
+    });
+    console.log('Tenant name corrected to: Winner Tecnologia');
   }
 
   // Backfill: vincular registros existentes sem tenant ao tenant padrão

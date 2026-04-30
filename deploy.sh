@@ -39,6 +39,10 @@ yarn install --frozen-lockfile 2>/dev/null || yarn install
 echo "[Deploy] Gerando Prisma Client..."
 yarn prisma generate
 
+echo "[Deploy] Aplicando migrações e seed..."
+yarn prisma db push --skip-generate 2>/dev/null || true
+npx tsx scripts/seed.ts 2>/dev/null || echo "[Deploy] AVISO: Seed falhou (não-crítico)"
+
 echo "[Deploy] Executando build..."
 yarn build
 
