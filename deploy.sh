@@ -113,107 +113,129 @@ fi
 echo "[Deploy] ✅ Build concluído. BUILD_ID: $(cat .next/BUILD_ID)"
 
 # ============================================================
-# 4. REINICIAR PM2
+# 4. PARAR APLICAÇÃO + LIBERAR PORTA 3000
 # ============================================================
 
-echo "[Deploy] Reiniciando aplicação..."
+echo "[Deploy] Parando aplicação antes do restart..."
 if command -v pm2 &> /dev/null; then
   echo "[Deploy] Processos PM2 antes:"
   pm2 list
 
-  # Encontrar o binário next de forma robusta
-  NEXT_BIN=""
-  for candidate in \
-    "$(pwd)/node_modules/.bin/next" \
-    "$(pwd)/node_modules/next/dist/bin/next" \
-    "$(which next 2>/dev/null)"; do
-    if [ -e "$candidate" ]; then
-      NEXT_BIN="$candidate"
-      break
-    fi
-  done
+  # 4a. Parar PM2 gracefully
+  pm2 stop winner-helpdesk 2>/dev/null || true
+  pm2 stop helpdesk 2>/dev/null || true
+  sleep 2
 
-  # Fallback final: usar node com require
-  if [ -z "$NEXT_BIN" ]; then
-    echo "[Deploy] ⚠️ Next binary não encontrado! Usando node -e require approach"
-    NEXT_BIN="node"
-    NEXT_ARGS="-e \"require('next/dist/bin/next')\" start -p 3000"
-  else
-    echo "[Deploy] Next binary: $NEXT_BIN"
-    NEXT_ARGS="start -p 3000"
+  # 4b. Matar qualquer processo na porta 3000 (garantir que libera)
+  echo "[Deploy] Verificando porta 3000..."
+  PORT_PID=$(lsof -ti:3000 2>/dev/null || true)
+  if [ -n "$PORT_PID" ]; then
+    echo "[Deploy] ⚠️ Porta 3000 ainda ocupada por PID: $PORT_PID — matando..."
+    kill -9 $PORT_PID 2>/dev/null || true
+    sleep 2
   fi
 
-  echo "[Deploy] Binário: $NEXT_BIN"
-  echo "[Deploy] Args: $NEXT_ARGS"
+  # 4c. Verificar novamente
+  PORT_PID2=$(lsof -ti:3000 2>/dev/null || true)
+  if [ -n "$PORT_PID2" ]; then
+    echo "[Deploy] ⚠️ Porta 3000 AINDA ocupada! Tentando fuser..."
+    fuser -k 3000/tcp 2>/dev/null || true
+    sleep 2
+  fi
+  echo "[Deploy] ✅ Porta 3000 liberada"
 
-  # Criar ecosystem usando node como interpretador (mais robusto com PM2)
-  NODE_BIN="$(which node)"
-  NEXT_CLI="$(pwd)/node_modules/next/dist/bin/next"
-  
-  cat > "$APP_DIR/ecosystem.config.js" << ECOEOF
+  # 4d. Deletar processos PM2 antigos
+  pm2 delete helpdesk 2>/dev/null || true
+  pm2 delete winner-helpdesk 2>/dev/null || true
+
+  # ============================================================
+  # 5. INICIAR PM2 COM ECOSYSTEM
+  # ============================================================
+
+  # Criar ecosystem.config.js usando yarn next (mais confiável)
+  cat > "$APP_DIR/ecosystem.config.js" << 'ECOEOF'
 module.exports = {
   apps: [{
     name: 'winner-helpdesk',
-    script: '${NODE_BIN}',
-    args: '${NEXT_CLI} start -p 3000',
-    cwd: '${APP_DIR}',
+    cwd: '/var/www/helpdesk/app',
+    script: 'node_modules/next/dist/bin/next',
+    args: 'start -p 3000',
     exec_mode: 'fork',
     instances: 1,
     autorestart: true,
     max_restarts: 10,
     min_uptime: '10s',
     max_memory_restart: '512M',
+    kill_timeout: 10000,
+    listen_timeout: 15000,
     env: {
       NODE_ENV: 'production',
-      PORT: '3000',
-      PATH: '${APP_DIR}/node_modules/.bin:/usr/local/bin:/usr/bin:/bin'
+      PORT: '3000'
     }
   }]
 };
 ECOEOF
 
-  echo "[Deploy] ecosystem.config.js:"
-  cat "$APP_DIR/ecosystem.config.js"
-
-  # Limpar processos antigos
-  pm2 delete helpdesk 2>/dev/null || true
-  pm2 delete winner-helpdesk 2>/dev/null || true
+  echo "[Deploy] ecosystem.config.js criado"
 
   # Iniciar com RUNNER_TRACKING_ID vazio para evitar orphan cleanup
+  echo "[Deploy] Iniciando PM2..."
   RUNNER_TRACKING_ID="" pm2 start "$APP_DIR/ecosystem.config.js"
-  sleep 5
+  
+  # Aguardar o Next.js compilar e iniciar
+  echo "[Deploy] Aguardando Next.js iniciar (15s)..."
+  sleep 15
+  
   RUNNER_TRACKING_ID="" pm2 save --force
 
   echo "[Deploy] Processos PM2 após restart:"
   pm2 list
 
   # ============================================================
-  # 5. HEALTH CHECK
+  # 6. HEALTH CHECK
   # ============================================================
-  echo "[Deploy] Aguardando app iniciar..."
-  sleep 5
+  echo "[Deploy] Verificando saúde da aplicação..."
   SUCCESS=false
-  for i in 1 2 3 4 5 6 7 8; do
+  for i in 1 2 3 4 5 6 7 8 9 10; do
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://localhost:3000/login 2>/dev/null || echo "000")
     if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "307" ]; then
-      echo "[Deploy] ✅ App respondendo corretamente (HTTP $HTTP_CODE)"
+      echo "[Deploy] ✅ App respondendo corretamente (HTTP $HTTP_CODE) na tentativa $i"
       SUCCESS=true
       break
-    elif [ "$HTTP_CODE" = "404" ]; then
-      echo "[Deploy] ⚠️ Tentativa $i - HTTP 404"
     else
-      echo "[Deploy] Tentativa $i - HTTP $HTTP_CODE"
+      echo "[Deploy] Tentativa $i/10 - HTTP $HTTP_CODE (aguardando...)"
     fi
-    sleep 3
+    sleep 5
   done
 
   if [ "$SUCCESS" = false ]; then
-    echo "[Deploy] ⚠️ App não respondeu com sucesso. Logs PM2:"
-    pm2 logs winner-helpdesk --nostream --lines 30 2>/dev/null || true
+    echo "[Deploy] ⚠️ App não respondeu. Verificando PM2 status e logs..."
+    pm2 list
+    echo "--- PM2 ERROR LOGS ---"
+    pm2 logs winner-helpdesk --nostream --lines 20 2>/dev/null || true
+    echo "--- FIM LOGS ---"
+    
+    # Tentativa de recuperação: matar tudo e reiniciar
+    echo "[Deploy] Tentando recuperação..."
+    pm2 delete winner-helpdesk 2>/dev/null || true
+    PORT_PID3=$(lsof -ti:3000 2>/dev/null || true)
+    [ -n "$PORT_PID3" ] && kill -9 $PORT_PID3 2>/dev/null || true
+    sleep 3
+    RUNNER_TRACKING_ID="" pm2 start "$APP_DIR/ecosystem.config.js"
+    sleep 15
+    
+    HTTP_FINAL=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://localhost:3000/login 2>/dev/null || echo "000")
+    if [ "$HTTP_FINAL" = "200" ] || [ "$HTTP_FINAL" = "302" ] || [ "$HTTP_FINAL" = "307" ]; then
+      echo "[Deploy] ✅ Recuperação bem-sucedida! (HTTP $HTTP_FINAL)"
+      RUNNER_TRACKING_ID="" pm2 save --force
+    else
+      echo "[Deploy] ❌ Recuperação falhou (HTTP $HTTP_FINAL). Verifique manualmente."
+      pm2 logs winner-helpdesk --nostream --lines 30 2>/dev/null || true
+    fi
   fi
 
-  # Verificar status PM2 final
-  pm2 status winner-helpdesk 2>/dev/null | grep -q "online" && echo "[Deploy] ✅ PM2 online" || echo "[Deploy] ⚠️ PM2 não está online!"
+  # Status final
+  pm2 status winner-helpdesk 2>/dev/null | grep -q "online" && echo "[Deploy] ✅ PM2 ONLINE - Deploy finalizado com sucesso" || echo "[Deploy] ⚠️ PM2 NÃO ESTÁ ONLINE"
 else
   echo "[Deploy] PM2 não encontrado. Tentando systemctl..."
   sudo systemctl restart helpdesk 2>/dev/null || echo "[Deploy] AVISO: Não foi possível reiniciar."
