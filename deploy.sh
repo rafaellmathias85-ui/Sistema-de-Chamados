@@ -1,14 +1,21 @@
 #!/bin/bash
 # ============================================================
-# deploy.sh v8 — Build & Restart VPS Hostinger
+# deploy.sh v9 — Build & Restart VPS Hostinger
 # Chamado pelo GitHub Actions após git pull
 #
-# v8 — CORREÇÕES BASEADAS NO DEPLOY #36:
-# 1. Mata processos órfãos do root (sudo kill) — causa do EADDRINUSE
-# 2. Verifica/gera NEXTAUTH_SECRET no .env — causa do 404
-# 3. Garante STORAGE_PROVIDER=local + UPLOADS_DIR no .env
-# 4. Cria diretório de uploads com permissões corretas
-# 5. Diagnóstico verbose mantido do v7
+# v9 — CORREÇÕES ESTRUTURAIS BASEADAS NO DEPLOY #37:
+# 1. PM2 SEMPRE como usuário ubuntu (sudo -u ubuntu pm2 ...)
+#    → impede daemon do PM2 rodar como root e criar zumbis
+# 2. Inicia app com binário DIRETO do Next (não via yarn wrapper)
+#    → evita filho órfão next-server quando yarn morre
+# 3. pkill com escopo cirúrgico (next-server, não "node" genérico)
+#    → não mata outros processos Node do sistema
+# 4. Loop de port-free com early break (ss -tlnp)
+#    → para no momento que porta libera
+# 5. Aborta deploy se porta seguir ocupada (não tenta start em vão)
+# 6. Detecta + migra PM2 do root → ubuntu se necessário
+#
+# v8 — fixes mantidos: NEXTAUTH_SECRET auto-gen, STORAGE_PROVIDER=local
 # ============================================================
 set -uo pipefail
 
@@ -17,49 +24,70 @@ ENV_BACKUP="/var/www/helpdesk/.env.backup"
 PM2_NAME="winner-helpdesk"
 PORT=3000
 UPLOADS_DIR="/var/lib/helpdesk/uploads"
+APP_USER="ubuntu"
+
+# Helper: roda comando pm2 como usuário ubuntu (não root)
+pm2_u() {
+  sudo -u "$APP_USER" pm2 "$@"
+}
 
 cd "$APP_DIR"
 
 echo "============================================"
-echo "[Deploy] DEPLOY v8 — $(date '+%Y-%m-%d %H:%M:%S')"
+echo "[Deploy] DEPLOY v9 — $(date '+%Y-%m-%d %H:%M:%S')"
 echo "============================================"
 echo "[Deploy] Node: $(node -v 2>/dev/null || echo 'N/A')"
 echo "[Deploy] Memória: $(free -m 2>/dev/null | awk '/Mem/{print $4}')MB livre"
-echo "[Deploy] Usuário: $(whoami)"
+echo "[Deploy] Usuário do script: $(whoami)"
+echo "[Deploy] PM2 alvo: usuário '$APP_USER'"
 
 show_port_info() {
   echo "[Deploy] --- PORTA $PORT ---"
   echo "[Deploy] ss -tlnp:"
-  ss -tlnp "sport = :$PORT" 2>/dev/null || echo "(vazio)"
-  echo "[Deploy] lsof -i:$PORT (com sudo):"
+  sudo ss -tlnp "sport = :$PORT" 2>/dev/null || ss -tlnp "sport = :$PORT" 2>/dev/null || echo "(vazio)"
+  echo "[Deploy] lsof -i:$PORT:"
   sudo lsof -i:$PORT 2>/dev/null || lsof -i:$PORT 2>/dev/null || echo "(vazio)"
-  echo "[Deploy] fuser $PORT/tcp (com sudo):"
-  sudo fuser -v $PORT/tcp 2>/dev/null || fuser -v $PORT/tcp 2>/dev/null || echo "(vazio)"
   echo "[Deploy] --- FIM PORTA ---"
 }
 
+is_port_busy() {
+  sudo ss -tlnp "sport = :$PORT" 2>/dev/null | grep -q "LISTEN" \
+    || ss -tlnp "sport = :$PORT" 2>/dev/null | grep -q "LISTEN"
+}
+
 # ============================================================
-# 0. LIMPEZA NUCLEAR ANTES DE TUDO (mata zumbis do root)
+# 0. DETECTAR & MIGRAR PM2 DO ROOT (se houver)
 # ============================================================
 echo ""
-echo "[Deploy] === LIMPEZA NUCLEAR INICIAL ==="
+echo "[Deploy] === DETECTANDO PM2 DO ROOT ==="
+if sudo -u root pm2 list 2>/dev/null | grep -q "$PM2_NAME"; then
+  echo "[Deploy] ⚠️ PM2 do root detectado contendo '$PM2_NAME'. Migrando..."
+  sudo pm2 delete all 2>/dev/null || true
+  sudo pm2 kill 2>/dev/null || true
+  sleep 2
+  echo "[Deploy] ✅ PM2 do root limpo"
+else
+  echo "[Deploy] ✅ Nenhum PM2 problemático no root"
+fi
+
+# ============================================================
+# 0b. LIMPEZA DE PROCESSOS ÓRFÃOS (escopo cirúrgico)
+# ============================================================
+echo ""
+echo "[Deploy] === LIMPEZA DE ÓRFÃOS ==="
 show_port_info
 
-echo "[Deploy] Identificando processos next-server/next start de QUALQUER usuário..."
-# Listar processos antes de matar para o log
-sudo ps -eo pid,user,comm,args 2>/dev/null | grep -E "next-server|next start|sh -c next" | grep -v grep || echo "(nenhum encontrado)"
+echo "[Deploy] Processos Next/yarn antes da limpeza:"
+sudo ps -eo pid,user,comm,args 2>/dev/null | grep -E "next-server|yarn.*start|sh -c next" | grep -v grep || echo "(nenhum)"
 
-echo "[Deploy] Matando processos com sudo..."
+echo "[Deploy] Matando órfãos (escopo cirúrgico, NÃO mata 'node' genérico)..."
 sudo pkill -9 -f "next-server" 2>/dev/null || true
 sudo pkill -9 -f "sh -c next start" 2>/dev/null || true
-sudo pkill -9 -f "next start" 2>/dev/null || true
+sudo pkill -9 -f "yarn.*start" 2>/dev/null || true
+sudo pkill -9 -f "node .*next/dist/bin/next" 2>/dev/null || true
 sleep 2
 
-echo "[Deploy] sudo fuser -k 3000/tcp..."
-sudo fuser -k -9 $PORT/tcp 2>/dev/null || true
-sleep 2
-
-echo "[Deploy] Pós limpeza nuclear:"
+echo "[Deploy] Pós limpeza:"
 show_port_info
 
 # ============================================================
@@ -67,11 +95,12 @@ show_port_info
 # ============================================================
 if [ ! -f ".env" ] && [ -f "$ENV_BACKUP" ]; then
   echo "[Deploy] Restaurando .env do backup..."
-  cp "$ENV_BACKUP" .env
+  sudo cp "$ENV_BACKUP" .env
+  sudo chown "$APP_USER:$APP_USER" .env
 fi
 
 if [ ! -f ".env" ]; then
-  echo "[Deploy] ERRO: .env não encontrado!"
+  echo "[Deploy] ❌ ERRO: .env não encontrado!"
   exit 1
 fi
 
@@ -79,79 +108,68 @@ fi
 # 2. REPARAR/GARANTIR VARIÁVEIS CRÍTICAS NO .env
 # ============================================================
 echo ""
-echo "[Deploy] === VERIFICANDO VARIÁVEIS CRÍTICAS NO .env ==="
+echo "[Deploy] === VARIÁVEIS CRÍTICAS NO .env ==="
 
-# 2a. NEXTAUTH_SECRET — CRÍTICO para login funcionar
+# 2a. NEXTAUTH_SECRET — CRÍTICO
 if ! grep -q "^NEXTAUTH_SECRET=" .env || [ -z "$(grep '^NEXTAUTH_SECRET=' .env | cut -d= -f2-)" ]; then
   echo "[Deploy] ⚠️ NEXTAUTH_SECRET ausente! Gerando novo secret..."
   NEW_SECRET=$(openssl rand -base64 48 | tr -d '\n')
-  # Remover linha existente (mesmo que vazia) e adicionar nova
   sed -i '/^NEXTAUTH_SECRET=/d' .env
   echo "NEXTAUTH_SECRET=$NEW_SECRET" >> .env
-  echo "[Deploy] ✅ NEXTAUTH_SECRET criado com sucesso"
+  echo "[Deploy] ✅ NEXTAUTH_SECRET criado"
 else
-  echo "[Deploy] ✅ NEXTAUTH_SECRET já configurado"
+  echo "[Deploy] ✅ NEXTAUTH_SECRET configurado"
 fi
 
-# 2b. NEXTAUTH_URL — necessário para callbacks de auth
+# 2b. NEXTAUTH_URL
 if ! grep -q "^NEXTAUTH_URL=" .env; then
-  echo "[Deploy] ⚠️ NEXTAUTH_URL ausente! Configurando para wticorp.com.br"
   echo "NEXTAUTH_URL=https://wticorp.com.br" >> .env
 fi
 
-# 2c. STORAGE_PROVIDER=local — anexos no VPS, NÃO no S3
+# 2c. STORAGE_PROVIDER=local
 if ! grep -q "^STORAGE_PROVIDER=" .env; then
-  echo "[Deploy] ⚠️ STORAGE_PROVIDER ausente! Configurando como local"
   echo "STORAGE_PROVIDER=local" >> .env
 else
   CURRENT_PROVIDER=$(grep '^STORAGE_PROVIDER=' .env | cut -d= -f2- | tr -d '\"')
   if [ "$CURRENT_PROVIDER" != "local" ]; then
-    echo "[Deploy] ⚠️ STORAGE_PROVIDER=$CURRENT_PROVIDER → corrigindo para local"
     sed -i 's/^STORAGE_PROVIDER=.*/STORAGE_PROVIDER=local/' .env
-  else
-    echo "[Deploy] ✅ STORAGE_PROVIDER=local"
   fi
 fi
+echo "[Deploy] ✅ STORAGE_PROVIDER=local"
 
-# 2d. UPLOADS_DIR — diretório onde os anexos ficam
+# 2d. UPLOADS_DIR
 if ! grep -q "^UPLOADS_DIR=" .env; then
-  echo "[Deploy] Configurando UPLOADS_DIR=$UPLOADS_DIR"
   echo "UPLOADS_DIR=$UPLOADS_DIR" >> .env
 fi
 
-# 2e. NODE_ENV=production
+# 2e. NODE_ENV
 if ! grep -q "^NODE_ENV=" .env; then
   echo "NODE_ENV=production" >> .env
 fi
 
-# Backup do .env (após reparos)
-cp .env "$ENV_BACKUP"
-echo "[Deploy] .env preservado em $ENV_BACKUP"
+# Backup
+sudo cp .env "$ENV_BACKUP"
+echo "[Deploy] ✅ .env preservado em $ENV_BACKUP"
 
 # ============================================================
-# 3. GARANTIR DIRETÓRIO DE UPLOADS (storage local)
+# 3. DIRETÓRIO DE UPLOADS
 # ============================================================
 echo ""
-echo "[Deploy] === DIRETÓRIO DE UPLOADS ==="
+echo "[Deploy] === UPLOADS ==="
 UPLOADS_PATH=$(grep '^UPLOADS_DIR=' .env | cut -d= -f2- | tr -d '\"')
 UPLOADS_PATH="${UPLOADS_PATH:-$UPLOADS_DIR}"
 
 if [ ! -d "$UPLOADS_PATH" ]; then
-  echo "[Deploy] Criando $UPLOADS_PATH..."
   sudo mkdir -p "$UPLOADS_PATH"
 fi
-
-# Garantir que o usuário ubuntu pode escrever
-sudo chown -R ubuntu:ubuntu "$UPLOADS_PATH" 2>/dev/null || true
+sudo chown -R "$APP_USER:$APP_USER" "$UPLOADS_PATH" 2>/dev/null || true
 sudo chmod -R 755 "$UPLOADS_PATH" 2>/dev/null || true
-
-echo "[Deploy] ✅ Uploads em $UPLOADS_PATH ($(du -sh $UPLOADS_PATH 2>/dev/null | cut -f1) usado)"
+echo "[Deploy] ✅ $UPLOADS_PATH ($(du -sh $UPLOADS_PATH 2>/dev/null | cut -f1))"
 
 # ============================================================
 # 4. CORREÇÕES ABACUS AI → VPS
 # ============================================================
 if grep -q '/home/ubuntu/winner_tecnologia_site' prisma/schema.prisma 2>/dev/null; then
-  echo "[Deploy] Corrigindo Prisma output..."
   sed -i '/output.*winner_tecnologia_site/d' prisma/schema.prisma
 fi
 
@@ -159,7 +177,6 @@ sed -i '/^NEXT_OUTPUT_MODE=/d' .env
 sed -i '/^NEXT_DIST_DIR=/d' .env
 
 if grep -q 'outputFileTracingRoot' next.config.js 2>/dev/null; then
-  echo "[Deploy] Corrigindo next.config.js..."
   sed -i '/outputFileTracingRoot/d' next.config.js
   python3 -c "
 import re
@@ -194,76 +211,126 @@ rm -rf .next
 echo "[Deploy] Build..."
 NODE_OPTIONS="--max-old-space-size=4096" yarn build
 
-[ ! -f ".next/BUILD_ID" ] && echo "[Deploy] ERRO: Sem BUILD_ID!" && exit 1
+if [ ! -f ".next/BUILD_ID" ]; then
+  echo "[Deploy] ❌ ERRO: Sem BUILD_ID!"
+  exit 1
+fi
 echo "[Deploy] ✅ Build OK — BUILD_ID: $(cat .next/BUILD_ID)"
 
+# Garantir ownership de .next + node_modules para ubuntu
+sudo chown -R "$APP_USER:$APP_USER" .next node_modules 2>/dev/null || true
+
 # ============================================================
-# 6. PARAR APLICAÇÃO (com PM2 + sudo kill)
+# 6. PARAR APLICAÇÃO (PM2 do ubuntu + cirurgia)
+# IMPORTANTE: Esta seção é desenhada para PRESERVAR o app antigo
+#             se houver qualquer problema. PM2 stop/delete só
+#             acontece DEPOIS de termos certeza que conseguimos liberar a porta.
 # ============================================================
 echo ""
-echo "[Deploy] === PARANDO APLICAÇÃO ==="
+echo "[Deploy] === PARANDO APLICAÇÃO (com salvaguardas) ==="
 
-# 6a. PM2 stop + delete
-pm2 stop all 2>/dev/null || true
-sleep 2
-pm2 delete all 2>/dev/null || true
-sleep 2
-
-# 6b. Limpeza nuclear novamente (após pm2 stop pode ter criado novos órfãos)
-echo "[Deploy] Matando órfãos pós-PM2 (com sudo)..."
-sudo pkill -9 -f "next-server" 2>/dev/null || true
-sudo pkill -9 -f "sh -c next start" 2>/dev/null || true
-sudo pkill -9 -f "next start" 2>/dev/null || true
-sudo fuser -k -9 $PORT/tcp 2>/dev/null || true
+# 6a. Stop suave do PM2 (sem delete ainda)
+pm2_u stop "$PM2_NAME" 2>/dev/null || true
 sleep 3
 
-# 6c. Verificar
+# 6b. Aguarda porta liberar SEM matar processos extras ainda
 PORT_FREE=false
-for i in $(seq 1 10); do
-  if ! ss -tlnp "sport = :$PORT" 2>/dev/null | grep -q "LISTEN"; then
-    echo "[Deploy] ✅ Porta $PORT livre (tentativa $i)"
+for i in $(seq 1 5); do
+  if ! is_port_busy; then
+    echo "[Deploy] ✅ Porta $PORT liberada após pm2 stop (tentativa $i)"
     PORT_FREE=true
     break
   fi
-  echo "[Deploy] Porta ocupada ($i/10) — kill extra..."
-  sudo fuser -k -9 $PORT/tcp 2>/dev/null || true
-  sudo pkill -9 -f "node" 2>/dev/null || true
+  echo "[Deploy] Aguardando porta liberar suavemente ($i/5)..."
   sleep 2
 done
 
+# 6c. Se porta ainda ocupada, escalar para kill cirúrgico
 if [ "$PORT_FREE" = false ]; then
-  echo "[Deploy] ⚠️ Porta ainda ocupada após 20s — diagnóstico:"
-  show_port_info
-  echo "[Deploy] Continuando mesmo assim..."
+  echo "[Deploy] Porta ainda ocupada — escalando para kill cirúrgico..."
+  sudo pkill -9 -f "next-server" 2>/dev/null || true
+  sudo pkill -9 -f "sh -c next start" 2>/dev/null || true
+  sudo pkill -9 -f "yarn.*start" 2>/dev/null || true
+  sudo pkill -9 -f "node .*next/dist/bin/next" 2>/dev/null || true
+  sleep 2
+
+  # Loop com early-break
+  for i in $(seq 1 8); do
+    if ! is_port_busy; then
+      echo "[Deploy] ✅ Porta $PORT livre (tentativa $i pós-kill)"
+      PORT_FREE=true
+      break
+    fi
+    echo "[Deploy] Porta ocupada ($i/8) — kill extra..."
+    sudo fuser -k -9 $PORT/tcp 2>/dev/null || true
+    sudo pkill -9 -f "next-server" 2>/dev/null || true
+    sleep 2
+  done
 fi
 
+# 6d. Se AINDA ocupada — ABORTA SEM TOCAR no PM2 atual (preserva app)
+if [ "$PORT_FREE" = false ]; then
+  echo "[Deploy] ❌❌❌ ABORTANDO: Porta $PORT segue ocupada após 30s"
+  echo "[Deploy] App antigo PRESERVADO (pm2_u start será executado para reativar)"
+  echo ""
+  echo "[Deploy] Tentando reativar app antigo..."
+  pm2_u start "$PM2_NAME" 2>/dev/null || true
+  sleep 5
+  pm2_u list
+  echo ""
+  echo "=== DIAGNÓSTICO ==="
+  show_port_info
+  echo ""
+  sudo ps -eo pid,user,comm,args 2>/dev/null | grep -E "next|yarn" | grep -v grep || true
+  echo ""
+  echo "[Deploy] Recuperação manual via SSH:"
+  echo "  sudo pkill -9 -f next-server"
+  echo "  sudo fuser -k 3000/tcp"
+  echo "  cd $APP_DIR && sudo -u $APP_USER PORT=$PORT pm2 start node_modules/next/dist/bin/next --name $PM2_NAME --interpreter node -- start"
+  exit 1
+fi
+
+# 6e. Porta liberada com sucesso — agora podemos fazer delete do PM2 antigo
+echo "[Deploy] Removendo entrada antiga do PM2..."
+pm2_u delete "$PM2_NAME" 2>/dev/null || true
+sleep 2
+
 # ============================================================
-# 7. INICIAR APLICAÇÃO
+# 7. INICIAR APLICAÇÃO (binário direto, como ubuntu)
 # ============================================================
 echo ""
 echo "[Deploy] === INICIANDO APLICAÇÃO ==="
 echo "[Deploy] Memória: $(free -m 2>/dev/null | awk '/Mem/{print $4}')MB livre"
+echo "[Deploy] Comando: sudo -u $APP_USER PORT=$PORT pm2 start node_modules/next/dist/bin/next --interpreter node"
 
-pm2 delete "$PM2_NAME" 2>/dev/null || true
+# Garante que o binário existe
+if [ ! -f "node_modules/next/dist/bin/next" ]; then
+  echo "[Deploy] ❌ ERRO: node_modules/next/dist/bin/next não encontrado!"
+  exit 1
+fi
 
-echo "[Deploy] Comando: PORT=$PORT pm2 start yarn --name $PM2_NAME -- start"
-RUNNER_TRACKING_ID="" \
+# IMPORTANTE: sudo -u ubuntu para PM2 daemon ser do ubuntu (não root)
+# IMPORTANTE: --interpreter node para PM2 monitorar o processo Node real
+#             (não yarn wrapper que cria filhos órfãos)
+sudo -u "$APP_USER" \
   PORT=$PORT \
   NODE_ENV=production \
-  pm2 start yarn \
+  RUNNER_TRACKING_ID="" \
+  pm2 start node_modules/next/dist/bin/next \
     --name "$PM2_NAME" \
+    --interpreter node \
     --cwd "$APP_DIR" \
-    --max-restarts 3 \
+    --max-restarts 5 \
     --restart-delay 5000 \
     --kill-timeout 30000 \
     --time \
     -- start
 
-echo "[Deploy] Aguardando 35s..."
+echo "[Deploy] Aguardando 35s para warmup..."
 sleep 35
 
-echo "[Deploy] Status PM2:"
-pm2 list
+echo "[Deploy] Status PM2 (ubuntu):"
+pm2_u list
 
 # ============================================================
 # 8. HEALTH CHECK
@@ -271,9 +338,10 @@ pm2 list
 echo ""
 echo "[Deploy] === HEALTH CHECK ==="
 SUCCESS=false
+RESTART_ATTEMPTED=false
 
-for i in $(seq 1 20); do
-  PM2_STATUS=$(pm2 jlist 2>/dev/null | python3 -c "
+for i in $(seq 1 24); do
+  PM2_STATUS=$(pm2_u jlist 2>/dev/null | python3 -c "
 import sys,json
 try:
   d=json.load(sys.stdin)
@@ -286,30 +354,28 @@ except: print('error')
 " 2>/dev/null || echo "unknown")
 
   if [ "$PM2_STATUS" = "errored" ] || [ "$PM2_STATUS" = "stopped" ]; then
-    echo "[Deploy] ⚠️ PM2 status: $PM2_STATUS"
-    pm2 logs "$PM2_NAME" --err --nostream --lines 15 2>/dev/null || true
-    
-    # Auto-recovery
-    sudo fuser -k -9 $PORT/tcp 2>/dev/null || true
-    sudo pkill -9 -f "next-server" 2>/dev/null || true
-    sleep 3
-    pm2 delete "$PM2_NAME" 2>/dev/null || true
-    sleep 2
-    RUNNER_TRACKING_ID="" PORT=$PORT NODE_ENV=production \
-      pm2 start yarn --name "$PM2_NAME" --cwd "$APP_DIR" --time -- start
-    sleep 30
-    continue
+    if [ "$RESTART_ATTEMPTED" = false ]; then
+      echo "[Deploy] ⚠️ PM2 status: $PM2_STATUS — tentando restart 1x"
+      pm2_u logs "$PM2_NAME" --err --nostream --lines 15 2>/dev/null || true
+      pm2_u restart "$PM2_NAME" 2>/dev/null || true
+      RESTART_ATTEMPTED=true
+      sleep 20
+      continue
+    else
+      echo "[Deploy] ❌ Falha persistente em PM2 — abortando health check"
+      break
+    fi
   fi
 
   HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://localhost:$PORT/login 2>/dev/null || echo "000")
 
   if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "307" ]; then
-    echo "[Deploy] ✅ HTTP $HTTP_CODE — App respondendo! (tentativa $i)"
+    echo "[Deploy] ✅ HTTP $HTTP_CODE — App respondendo (tentativa $i)!"
     SUCCESS=true
     break
   fi
 
-  echo "[Deploy] Tentativa $i/20 — HTTP $HTTP_CODE | PM2: $PM2_STATUS"
+  echo "[Deploy] Tentativa $i/24 — HTTP $HTTP_CODE | PM2: $PM2_STATUS"
   sleep 5
 done
 
@@ -318,24 +384,24 @@ done
 # ============================================================
 echo ""
 if [ "$SUCCESS" = true ]; then
-  RUNNER_TRACKING_ID="" pm2 save --force
-  pm2 list
+  pm2_u save --force
+  pm2_u list
   echo ""
-  echo "[Deploy] ✅✅✅ DEPLOY v8 CONCLUÍDO COM SUCESSO ✅✅✅"
+  echo "[Deploy] ✅✅✅ DEPLOY v9 CONCLUÍDO COM SUCESSO ✅✅✅"
 else
-  echo "[Deploy] ❌❌❌ DEPLOY v8 FALHOU ❌❌❌"
+  echo "[Deploy] ❌❌❌ DEPLOY v9 FALHOU ❌❌❌"
   echo ""
   echo "=== DIAGNÓSTICO ==="
-  pm2 list 2>/dev/null || true
+  pm2_u list 2>/dev/null || true
   echo ""
   echo "--- PM2 DESCRIBE ---"
-  pm2 describe "$PM2_NAME" 2>/dev/null || true
+  pm2_u describe "$PM2_NAME" 2>/dev/null || true
   echo ""
   echo "--- PM2 ERROR LOGS ---"
-  pm2 logs "$PM2_NAME" --err --nostream --lines 50 2>/dev/null || true
+  pm2_u logs "$PM2_NAME" --err --nostream --lines 50 2>/dev/null || true
   echo ""
   echo "--- PM2 OUT LOGS ---"
-  pm2 logs "$PM2_NAME" --out --nostream --lines 30 2>/dev/null || true
+  pm2_u logs "$PM2_NAME" --out --nostream --lines 30 2>/dev/null || true
   echo ""
   echo "--- PORTA $PORT ---"
   show_port_info
@@ -349,12 +415,12 @@ else
   echo "--- MEMÓRIA ---"
   free -m 2>/dev/null || true
   echo ""
-  echo "[Deploy] Recuperação manual:"
+  echo "[Deploy] Recuperação manual via SSH:"
   echo "  sudo pkill -9 -f next-server"
   echo "  sudo fuser -k 3000/tcp"
-  echo "  pm2 delete all"
-  echo "  cd $APP_DIR && PORT=3000 pm2 start yarn --name $PM2_NAME -- start"
-  echo "  pm2 save --force"
+  echo "  sudo -u ubuntu pm2 delete $PM2_NAME"
+  echo "  cd $APP_DIR && sudo -u ubuntu PORT=3000 pm2 start node_modules/next/dist/bin/next --name $PM2_NAME --interpreter node -- start"
+  echo "  sudo -u ubuntu pm2 save --force"
 fi
 
-echo "[Deploy] === FIM v8 ==="
+echo "[Deploy] === FIM v9 ==="
