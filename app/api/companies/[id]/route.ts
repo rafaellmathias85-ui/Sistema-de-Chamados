@@ -60,7 +60,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { name, cnpj, phone, email, domain, needsAttention } = body;
+    const { name, cnpj, phone, email, domain, needsAttention, clientType } = body;
 
     const updateData: any = {};
 
@@ -170,6 +170,14 @@ export async function PATCH(
     // Atualizar flag needsAttention
     if (needsAttention !== undefined) {
       updateData.needsAttention = needsAttention;
+    }
+
+    // Atualizar tipo de cliente
+    if (clientType !== undefined) {
+      const validTypes = ['CONTRATO', 'AVULSO', 'PROJETO', 'PARCEIRO'];
+      if (validTypes.includes(clientType)) {
+        updateData.clientType = clientType;
+      }
     }
 
     const company = await prisma.company.update({

@@ -34,6 +34,7 @@ interface Company {
   phone: string | null;
   email: string | null;
   domain: string | null;
+  clientType: string;
   needsAttention: boolean;
   _count: { users: number; tickets: number };
 }
@@ -516,6 +517,7 @@ export default function AdminPage() {
                     <input type="checkbox" checked={selectedCompanies.size === filteredCompanies.length && filteredCompanies.length > 0} onChange={toggleSelectAllCompanies} className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer" />
                   </th>
                   <th className="text-left px-4 py-3 tm-text-secondary font-medium">Empresa</th>
+                  <th className="text-left px-4 py-3 tm-text-secondary font-medium">Tipo</th>
                   <th className="text-left px-4 py-3 tm-text-secondary font-medium">Domínio</th>
                   <th className="text-left px-4 py-3 tm-text-secondary font-medium">CPF/CNPJ</th>
                   <th className="text-left px-4 py-3 tm-text-secondary font-medium">Contato</th>
@@ -540,6 +542,14 @@ export default function AdminPage() {
                           </span>
                         )}
                       </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const typeLabels: Record<string, string> = { CONTRATO: 'Contrato', AVULSO: 'Avulso', PROJETO: 'Projeto', PARCEIRO: 'Parceiro' };
+                        const typeColors: Record<string, string> = { CONTRATO: 'bg-blue-500/20 text-blue-300', AVULSO: 'bg-amber-500/20 text-amber-300', PROJETO: 'bg-cyan-500/20 text-cyan-300', PARCEIRO: 'bg-violet-500/20 text-violet-300' };
+                        const t = company.clientType || 'CONTRATO';
+                        return <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${typeColors[t] || 'bg-gray-500/20 text-gray-300'}`}>{typeLabels[t] || t}</span>;
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       {company.domain ? (

@@ -84,9 +84,23 @@ export async function POST(
 
     let body: any;
     try {
-      body = await request.json();
+      const ct = request.headers.get('content-type') || '';
+      if (ct.includes('multipart/form-data')) {
+        // Se veio como FormData, tratar sem JSON.parse
+        const formData = await request.formData();
+        body = {
+          fileName: formData.get('fileName') as string,
+          fileSize: Number(formData.get('fileSize') || 0),
+          fileType: formData.get('fileType') as string,
+          cloudStoragePath: formData.get('cloudStoragePath') as string,
+          isPublic: formData.get('isPublic') === 'true',
+        };
+      } else {
+        const rawText = await request.text();
+        body = JSON.parse(rawText);
+      }
     } catch (parseErr) {
-      console.error('Erro ao parsear JSON do anexo:', parseErr);
+      console.error('[Attachments POST] Erro ao parsear body:', parseErr);
       return NextResponse.json({ error: 'JSON inválido no corpo da requisição' }, { status: 400 });
     }
     const { fileName, fileType, cloudStoragePath, isPublic = false } = body;
