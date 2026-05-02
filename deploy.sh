@@ -26,12 +26,42 @@ if [ -f ".env" ]; then
   cp .env "$ENV_BACKUP"
 fi
 
-# Fix: schema.prisma pode ter output absoluto do Abacus AI
-# Remover para usar default (node_modules/.prisma/client relativo)
+# ============================================================
+# CORREÇÕES ABACUS AI → VPS
+# Remover variáveis e configs que são do ambiente Abacus
+# ============================================================
+
+# 1. Remover output absoluto do Prisma
 if grep -q '/home/ubuntu/winner_tecnologia_site' prisma/schema.prisma 2>/dev/null; then
   echo "[Deploy] Corrigindo output do Prisma..."
   sed -i '/output.*winner_tecnologia_site/d' prisma/schema.prisma
 fi
+
+# 2. Remover NEXT_OUTPUT_MODE e NEXT_DIST_DIR do .env
+#    Essas variáveis são do Abacus AI e causam 404 no VPS
+#    (standalone mode + next start são incompatíveis)
+if [ -f ".env" ]; then
+  sed -i '/^NEXT_OUTPUT_MODE=/d' .env
+  sed -i '/^NEXT_DIST_DIR=/d' .env
+  echo "[Deploy] Variáveis Abacus removidas do .env"
+fi
+
+# 3. Remover outputFileTracingRoot do next.config.js
+#    (não é necessário para deploy VPS e pode causar problemas)
+if grep -q 'outputFileTracingRoot' next.config.js 2>/dev/null; then
+  echo "[Deploy] Removendo outputFileTracingRoot do next.config.js..."
+  sed -i '/outputFileTracingRoot/d' next.config.js
+  # Limpar experimental block se ficou vazio
+  sed -i '/experimental:\s*{\s*},\?/d' next.config.js 2>/dev/null || true
+fi
+
+# 4. Unset variáveis do shell (belt and suspenders)
+unset NEXT_OUTPUT_MODE
+unset NEXT_DIST_DIR
+
+# ============================================================
+# BUILD
+# ============================================================
 
 echo "[Deploy] Instalando dependências..."
 yarn install --frozen-lockfile 2>/dev/null || yarn install
@@ -47,11 +77,6 @@ npx tsx scripts/seed.ts 2>/dev/null || echo "[Deploy] AVISO: Seed falhou (não-c
 echo "[Deploy] Limpando build anterior..."
 rm -rf .next .build
 
-# Garantir que NEXT_OUTPUT_MODE e NEXT_DIST_DIR NÃO estejam setados
-# (são variáveis do Abacus AI que não devem existir no VPS)
-unset NEXT_OUTPUT_MODE
-unset NEXT_DIST_DIR
-
 echo "[Deploy] Executando build..."
 yarn build
 
@@ -60,13 +85,13 @@ if command -v pm2 &> /dev/null; then
   echo "[Deploy] Processos PM2 antes:"
   pm2 list
   
-  # Criar ecosystem file com node diretamente (evita yarn wrapper)
+  # Criar ecosystem file
   cat > "$APP_DIR/ecosystem.config.js" << 'ECOEOF'
 module.exports = {
   apps: [{
     name: 'winner-helpdesk',
-    script: 'node_modules/.bin/next',
-    args: 'start -p 3000',
+    script: 'yarn',
+    args: 'start',
     cwd: '/var/www/helpdesk/app',
     exec_mode: 'fork',
     instances: 1,
