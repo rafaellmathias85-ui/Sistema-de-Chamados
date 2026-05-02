@@ -325,18 +325,24 @@ export default function TicketDetailPage() {
     const styles: Record<string, string> = {
       OPEN: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
       IN_PROGRESS: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+      IN_PARTNER: 'bg-violet-500/20 text-violet-400 border-violet-500/30',
+      PAUSED: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+      AWAITING_CLIENT: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
       RESOLVED: 'bg-green-500/20 text-green-400 border-green-500/30',
       CLOSED: 'bg-gray-500/20 tm-text-secondary border-gray-500/30',
     };
     const labels: Record<string, string> = {
       OPEN: 'Aberto',
       IN_PROGRESS: 'Em Andamento',
+      IN_PARTNER: 'Parceiro',
+      PAUSED: 'Pausado',
+      AWAITING_CLIENT: 'Aguardando Cliente',
       RESOLVED: 'Resolvido',
       CLOSED: 'Fechado',
     };
     return (
-      <span className={`px-3 py-1.5 rounded-full text-sm font-medium border ${styles[status]}`}>
-        {labels[status]}
+      <span className={`px-3 py-1.5 rounded-full text-sm font-medium border ${styles[status] || styles.OPEN}`}>
+        {labels[status] || status}
       </span>
     );
   };
@@ -662,6 +668,26 @@ export default function TicketDetailPage() {
                 )}
               </div>
             </div>
+
+            {/* Status change dropdown - staff only */}
+            {isStaff && ticket.status !== 'CLOSED' && (
+              <div>
+                <p className="text-xs tm-text-muted mb-1">Alterar Status</p>
+                <select
+                  value={ticket.status}
+                  onChange={(e) => handleUpdateStatus(e.target.value)}
+                  disabled={updating}
+                  className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 tm-text text-sm focus:border-blue-500 outline-none"
+                >
+                  <option value="OPEN">Aberto</option>
+                  <option value="IN_PROGRESS">Em Andamento</option>
+                  <option value="IN_PARTNER">Parceiro</option>
+                  <option value="PAUSED">Pausado</option>
+                  <option value="AWAITING_CLIENT">Aguardando Cliente</option>
+                  <option value="RESOLVED">Resolvido</option>
+                </select>
+              </div>
+            )}
 
             <div>
               <p className="text-xs tm-text-muted mb-1">Criado em</p>

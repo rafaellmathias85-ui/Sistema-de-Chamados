@@ -89,6 +89,8 @@ export async function POST(request: NextRequest) {
       startTime,
       endTime,
       observation,
+      notifyClient = false,
+      autoNotify7Days = false,
     } = body;
 
     if (!technicianId || !date || !startTime || !endTime) {
@@ -179,6 +181,8 @@ export async function POST(request: NextRequest) {
         companyId: companyId || null,
         requesterName: requesterName || null,
         requesterEmail: requesterEmail || null,
+        notifyClient: !!notifyClient,
+        autoNotify7Days: !!autoNotify7Days,
         createdById: session.user.id,
         createdByName: session.user.name || 'Usuário',
       },
@@ -216,8 +220,8 @@ export async function POST(request: NextRequest) {
       companyName: ticket.company?.name || '',
     };
 
-    // 1. Email para o solicitante/cliente
-    if (requesterEmail) {
+    // 1. Email para o solicitante/cliente (somente se notifyClient ativo)
+    if (requesterEmail && notifyClient) {
       try {
         const { sendNotificationEmail } = await import('@/lib/notifications');
         await sendNotificationEmail({
@@ -577,6 +581,151 @@ function getTechnicianAppointmentTemplate(data: {
       </div>
     </div>
   `;
+}
+
+// PATCH - Edit/reschedule appointment
+export async function PATCH(request: NextRequest) {
+  try {
+    const session = await getSession();
+    if (!session?.user || !['ADMIN', 'SUPPORT', 'FINANCE'].includes(session.user.role)) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    const body = await request.json();
+    const { id, technicianId, date, startTime, endTime, observation, notifyClient, autoNotify7Days } = body;
+
+    if (!id) return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
+
+    const existing = await prisma.appointment.findUnique({
+      where: { id },
+      include: { ticket: { select: { id: true, number: true, subject: true, company: { select: { name: true } } } } },
+    });
+    if (!existing) return NextResponse.json({ error: 'Agendamento não encontrado' }, { status: 404 });
+
+    // Support can only edit own appointments
+    if (session.user.role === 'SUPPORT' && existing.technicianId !== session.user.id) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    const updateData: any = {};
+    const newTechId = technicianId || existing.technicianId;
+    const newDate = date || existing.date;
+    const newStart = startTime || existing.startTime;
+    const newEnd = endTime || existing.endTime;
+
+    if (technicianId && technicianId !== existing.technicianId) {
+      const tech = await prisma.user.findUnique({ where: { id: technicianId }, select: { name: true } });
+      if (!tech) return NextResponse.json({ error: 'Técnico não encontrado' }, { status: 404 });
+      updateData.technicianId = technicianId;
+      updateData.technicianName = tech.name;
+    }
+
+    if (date) {
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      updateData.date = d;
+    }
+    if (startTime) updateData.startTime = startTime;
+    if (endTime) updateData.endTime = endTime;
+    if (observation !== undefined) updateData.observation = observation || null;
+    if (notifyClient !== undefined) updateData.notifyClient = notifyClient;
+    if (autoNotify7Days !== undefined) {
+      updateData.autoNotify7Days = autoNotify7Days;
+      if (!autoNotify7Days) updateData.reminderSent = false;
+    }
+
+    // Check conflicts (exclude current appointment)
+    if (date || startTime || endTime || technicianId) {
+      const dateObj = new Date(newDate);
+      const startOfDay = new Date(dateObj);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(dateObj);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const others = await prisma.appointment.findMany({
+        where: { technicianId: newTechId, date: { gte: startOfDay, lte: endOfDay }, id: { not: id } },
+      });
+
+      const conflict = others.find(a => newStart < a.endTime && newEnd > a.startTime);
+      if (conflict) {
+        return NextResponse.json({
+          error: `Conflito de horário! Técnico já tem agendamento de ${conflict.startTime} às ${conflict.endTime} nesta data.`,
+          conflict: true,
+        }, { status: 409 });
+      }
+    }
+
+    const updated = await prisma.appointment.update({
+      where: { id },
+      data: updateData,
+      include: { ticket: { select: { number: true, subject: true, company: { select: { name: true } } } } },
+    });
+
+    // Update ticket description if date changed
+    if (date || startTime || endTime) {
+      const dateStr = new Date(updated.date).toLocaleDateString('pt-BR');
+      await prisma.ticket.update({
+        where: { id: existing.ticketId },
+        data: {
+          description: `Visita técnica reagendada para ${dateStr} das ${updated.startTime} às ${updated.endTime}.${existing.requesterName ? `\nSolicitante: ${existing.requesterName}` : ''}${existing.requesterEmail ? ` (${existing.requesterEmail})` : ''}${updated.observation ? `\nObservação: ${updated.observation}` : ''}`,
+        },
+      });
+    }
+
+    // Log in ticket history
+    const changes: string[] = [];
+    if (date && new Date(date).toISOString().slice(0, 10) !== new Date(existing.date).toISOString().slice(0, 10))
+      changes.push(`Data: ${new Date(existing.date).toLocaleDateString('pt-BR')} → ${new Date(date).toLocaleDateString('pt-BR')}`);
+    if (startTime && startTime !== existing.startTime) changes.push(`Início: ${existing.startTime} → ${startTime}`);
+    if (endTime && endTime !== existing.endTime) changes.push(`Fim: ${existing.endTime} → ${endTime}`);
+    if (technicianId && technicianId !== existing.technicianId) changes.push(`Técnico alterado`);
+
+    if (changes.length > 0) {
+      await prisma.ticketHistory.create({
+        data: {
+          ticketId: existing.ticketId,
+          action: 'appointment_updated',
+          fromValue: `${existing.startTime}-${existing.endTime}`,
+          toValue: `${updated.startTime}-${updated.endTime}`,
+          note: `Visita técnica reagendada: ${changes.join('; ')}`,
+          userId: session.user.id,
+          userName: session.user.name || 'Usuário',
+          userRole: session.user.role as Role,
+        },
+      });
+    }
+
+    // Send reschedule email to client if notifyClient
+    if (notifyClient && existing.requesterEmail) {
+      try {
+        const dateStr = new Date(updated.date).toLocaleDateString('pt-BR');
+        const { sendNotificationEmail } = await import('@/lib/notifications');
+        await sendNotificationEmail({
+          notificationId: process.env.NOTIF_ID_CONFIRMAO_VISITA_TCNICA || '',
+          recipientEmail: existing.requesterEmail,
+          subject: `📅 Visita Técnica Reagendada - Chamado #${existing.ticket.number}`,
+          body: getAppointmentConfirmationTemplate({
+            ticketNumber: existing.ticket.number,
+            requesterName: existing.requesterName || '',
+            technicianName: updated.technicianName,
+            date: dateStr,
+            rawDate: updated.date,
+            startTime: updated.startTime,
+            endTime: updated.endTime,
+            observation: updated.observation || '',
+            companyName: existing.ticket.company?.name || '',
+          }),
+        });
+      } catch (emailErr) {
+        console.error('Erro ao enviar email de reagendamento:', emailErr);
+      }
+    }
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    console.error('Error updating appointment:', error);
+    return NextResponse.json({ error: 'Erro ao atualizar agendamento' }, { status: 500 });
+  }
 }
 
 // DELETE - Remove appointment

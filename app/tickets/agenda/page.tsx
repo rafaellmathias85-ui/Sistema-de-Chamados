@@ -17,6 +17,10 @@ import {
   Building2,
   Mail,
   Loader2,
+  Pencil,
+  Bell,
+  BellOff,
+  Timer,
 } from 'lucide-react';
 
 interface Appointment {
@@ -28,6 +32,11 @@ interface Appointment {
   startTime: string;
   endTime: string;
   observation: string | null;
+  notifyClient?: boolean;
+  autoNotify7Days?: boolean;
+  reminderSent?: boolean;
+  requesterName?: string | null;
+  requesterEmail?: string | null;
   ticket: {
     number: number;
     subject: string;
@@ -50,18 +59,19 @@ export default function AgendaPage() {
   const [supportUsers, setSupportUsers] = useState<SupportUser[]>([]);
   const [techFilter, setTechFilter] = useState('');
 
-  // New appointment modal
-  const [showNewModal, setShowNewModal] = useState(false);
-  const [newForm, setNewForm] = useState({
+  // New/Edit modal
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({
     companyId: '', contactId: '', requesterName: '', requesterEmail: '',
     technicianId: '', date: '', startTime: '09:00', endTime: '10:00', observation: '',
+    notifyClient: false, autoNotify7Days: false,
   });
-  const [newError, setNewError] = useState('');
-  const [savingNew, setSavingNew] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [contacts, setContacts] = useState<{ id: string; name: string; email: string }[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(false);
-  const [autoTicketNumber, setAutoTicketNumber] = useState<string>('(auto)');
 
   const isAdmin = session?.user?.role === 'ADMIN';
   const isSupport = session?.user?.role === 'SUPPORT';
@@ -71,9 +81,7 @@ export default function AgendaPage() {
     if (status === 'unauthenticated') router.push('/login');
     else if (status === 'authenticated') {
       if (!['ADMIN', 'SUPPORT', 'FINANCE'].includes(session?.user?.role || '')) router.push('/tickets');
-      else {
-        loadSupportUsers();
-      }
+      else loadSupportUsers();
     }
   }, [status]);
 
@@ -108,8 +116,6 @@ export default function AgendaPage() {
       ]);
       let contactList: { id: string; name: string; email: string }[] = [];
       if (contactsRes.ok) contactList = await contactsRes.json();
-
-      // Prioritize company main email contact
       if (companyRes.ok) {
         const company = await companyRes.json();
         if (company.email) {
@@ -125,27 +131,19 @@ export default function AgendaPage() {
     finally { setLoadingContacts(false); }
   };
 
-  // Load companies when modal opens
   useEffect(() => {
-    if (showNewModal && companies.length === 0) loadCompanies();
-  }, [showNewModal]);
+    if (showModal && companies.length === 0) loadCompanies();
+  }, [showModal]);
 
-  // Load contacts when company changes + auto-select first
   useEffect(() => {
-    if (newForm.companyId) {
-      const loadAndAutoSelect = async () => {
-        await loadContacts(newForm.companyId);
-      };
-      setNewForm(f => ({ ...f, contactId: '', requesterName: '', requesterEmail: '' }));
-      loadAndAutoSelect();
-    } else {
-      setContacts([]);
+    if (form.companyId && !editingId) {
+      setForm(f => ({ ...f, contactId: '', requesterName: '', requesterEmail: '' }));
+      loadContacts(form.companyId);
     }
-  }, [newForm.companyId]);
+  }, [form.companyId]);
 
-  // Auto-select first contact when contacts load
   useEffect(() => {
-    if (contacts.length > 0 && !newForm.contactId) {
+    if (contacts.length > 0 && !form.contactId && !editingId) {
       handleContactSelect(contacts[0].id);
     }
   }, [contacts]);
@@ -176,54 +174,86 @@ export default function AgendaPage() {
     } catch {}
   };
 
-  const createAppointment = async () => {
-    setSavingNew(true);
-    setNewError('');
+  const openNewModal = () => {
+    setEditingId(null);
+    setForm({
+      companyId: '', contactId: '', requesterName: '', requesterEmail: '',
+      technicianId: '', date: selectedDate || new Date().toISOString().slice(0, 10),
+      startTime: '09:00', endTime: '10:00', observation: '',
+      notifyClient: false, autoNotify7Days: false,
+    });
+    setFormError('');
+    setShowModal(true);
+  };
+
+  const openEditModal = (appt: Appointment) => {
+    setEditingId(appt.id);
+    setForm({
+      companyId: '', contactId: '', requesterName: appt.requesterName || '', requesterEmail: appt.requesterEmail || '',
+      technicianId: appt.technicianId, date: appt.date.slice(0, 10),
+      startTime: appt.startTime, endTime: appt.endTime, observation: appt.observation || '',
+      notifyClient: appt.notifyClient || false, autoNotify7Days: appt.autoNotify7Days || false,
+    });
+    setFormError('');
+    setShowModal(true);
+  };
+
+  const saveAppointment = async () => {
+    setSaving(true);
+    setFormError('');
     try {
-      const res = await fetch('/api/appointments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          autoCreateTicket: true,
-          companyId: newForm.companyId,
-          requesterName: newForm.requesterName,
-          requesterEmail: newForm.requesterEmail,
-          technicianId: newForm.technicianId || session?.user?.id,
-          date: newForm.date,
-          startTime: newForm.startTime,
-          endTime: newForm.endTime,
-          observation: newForm.observation || undefined,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setNewError(data.error || 'Erro ao criar agendamento');
-        setSavingNew(false);
-        return;
+      if (editingId) {
+        // Edit/Reschedule
+        const res = await fetch('/api/appointments', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: editingId,
+            technicianId: form.technicianId || undefined,
+            date: form.date,
+            startTime: form.startTime,
+            endTime: form.endTime,
+            observation: form.observation || undefined,
+            notifyClient: form.notifyClient,
+            autoNotify7Days: form.autoNotify7Days,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setFormError(data.error || 'Erro ao atualizar'); setSaving(false); return; }
+      } else {
+        // Create
+        const res = await fetch('/api/appointments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            autoCreateTicket: true,
+            companyId: form.companyId,
+            requesterName: form.requesterName,
+            requesterEmail: form.requesterEmail,
+            technicianId: form.technicianId || session?.user?.id,
+            date: form.date,
+            startTime: form.startTime,
+            endTime: form.endTime,
+            observation: form.observation || undefined,
+            notifyClient: form.notifyClient,
+            autoNotify7Days: form.autoNotify7Days,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setFormError(data.error || 'Erro ao criar'); setSaving(false); return; }
       }
-
-      setShowNewModal(false);
-      setNewForm({
-        companyId: '', contactId: '', requesterName: '', requesterEmail: '',
-        technicianId: '', date: '', startTime: '09:00', endTime: '10:00', observation: '',
-      });
+      setShowModal(false);
       loadAppointments();
     } catch (error: any) {
-      setNewError(error.message || 'Erro ao criar agendamento');
+      setFormError(error.message || 'Erro');
     } finally {
-      setSavingNew(false);
+      setSaving(false);
     }
   };
 
   const handleContactSelect = (contactId: string) => {
     const contact = contacts.find(c => c.id === contactId);
-    setNewForm(f => ({
-      ...f,
-      contactId,
-      requesterName: contact?.name || '',
-      requesterEmail: contact?.email || '',
-    }));
+    setForm(f => ({ ...f, contactId, requesterName: contact?.name || '', requesterEmail: contact?.email || '' }));
   };
 
   // Calendar helpers
@@ -248,12 +278,8 @@ export default function AgendaPage() {
 
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
-
   const todayStr = new Date().toISOString().slice(0, 10);
-
-  const selectedAppts = selectedDate
-    ? appointments.filter(a => a.date.slice(0, 10) === selectedDate)
-    : [];
+  const selectedAppts = selectedDate ? appointments.filter(a => a.date.slice(0, 10) === selectedDate) : [];
 
   if (status === 'loading') {
     return <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" /></div>;
@@ -267,12 +293,12 @@ export default function AgendaPage() {
           <CalIcon className="w-7 h-7 text-blue-400" />
           Agenda de Visitas Técnicas
         </h1>
-        <button onClick={() => { setShowNewModal(true); setNewForm(f => ({ ...f, date: selectedDate || todayStr })); }} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium">
+        <button onClick={openNewModal} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium">
           <Plus size={18} /> Novo Agendamento
         </button>
       </div>
 
-      {/* Technician filter (admin + finance) */}
+      {/* Technician filter */}
       {(isAdmin || isFinance) && (
         <div className="flex items-center gap-3">
           <User size={18} className="tm-text-secondary" />
@@ -285,50 +311,31 @@ export default function AgendaPage() {
 
       {/* Calendar */}
       <div className="tm-bg-card border tm-border rounded-xl overflow-hidden">
-        {/* Month navigation */}
         <div className="flex items-center justify-between p-4 border-b tm-border">
           <button onClick={prevMonth} className="p-2 tm-text-secondary hover:tm-text hover:bg-white/10 rounded-lg transition-colors"><ChevronLeft size={20} /></button>
           <h2 className="text-lg font-bold tm-text">{monthNames[month]} {year}</h2>
           <button onClick={nextMonth} className="p-2 tm-text-secondary hover:tm-text hover:bg-white/10 rounded-lg transition-colors"><ChevronRight size={20} /></button>
         </div>
-
-        {/* Day headers */}
         <div className="grid grid-cols-7 border-b tm-border">
-          {dayNames.map(d => (
-            <div key={d} className="py-2 text-center text-xs font-semibold tm-text-muted uppercase">{d}</div>
-          ))}
+          {dayNames.map(d => <div key={d} className="py-2 text-center text-xs font-semibold tm-text-muted uppercase">{d}</div>)}
         </div>
-
-        {/* Calendar grid */}
         <div className="grid grid-cols-7">
           {calendarDays.map((day, idx) => {
             if (day === null) return <div key={`empty-${idx}`} className="min-h-[80px] md:min-h-[100px] border-b border-r tm-border bg-white/[0.02]" />;
-            
             const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const dayAppts = getAppointmentsForDay(day);
             const isToday = dateStr === todayStr;
             const isSelected = dateStr === selectedDate;
-
             return (
-              <div
-                key={day}
-                onClick={() => setSelectedDate(isSelected ? null : dateStr)}
-                className={`min-h-[80px] md:min-h-[100px] border-b border-r tm-border p-1 cursor-pointer transition-colors hover:tm-bg-card ${
-                  isSelected ? 'bg-blue-500/10 border-blue-500/30' : ''
-                }`}
-              >
-                <div className={`text-sm font-medium mb-1 w-7 h-7 flex items-center justify-center rounded-full ${
-                  isToday ? 'bg-blue-500 tm-text' : 'text-white'
-                }`}>{day}</div>
+              <div key={day} onClick={() => setSelectedDate(isSelected ? null : dateStr)} className={`min-h-[80px] md:min-h-[100px] border-b border-r tm-border p-1 cursor-pointer transition-colors hover:tm-bg-card ${isSelected ? 'bg-blue-500/10 border-blue-500/30' : ''}`}>
+                <div className={`text-sm font-medium mb-1 w-7 h-7 flex items-center justify-center rounded-full ${isToday ? 'bg-blue-500 tm-text' : 'text-white'}`}>{day}</div>
                 <div className="space-y-0.5">
                   {dayAppts.slice(0, 3).map(a => (
                     <div key={a.id} className="text-[10px] px-1 py-0.5 bg-blue-500/20 text-blue-300 rounded truncate">
                       {a.startTime} #{a.ticket.number} {a.ticket.company.name}
                     </div>
                   ))}
-                  {dayAppts.length > 3 && (
-                    <div className="text-[10px] tm-text-muted px-1">+{dayAppts.length - 3} mais</div>
-                  )}
+                  {dayAppts.length > 3 && <div className="text-[10px] tm-text-muted px-1">+{dayAppts.length - 3} mais</div>}
                 </div>
               </div>
             );
@@ -339,12 +346,7 @@ export default function AgendaPage() {
       {/* Selected day details */}
       <AnimatePresence>
         {selectedDate && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="tm-bg-card border tm-border rounded-xl overflow-hidden"
-          >
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="tm-bg-card border tm-border rounded-xl overflow-hidden">
             <div className="p-4 border-b tm-border flex items-center justify-between">
               <h3 className="tm-text font-medium">
                 Agendamentos - {new Date(selectedDate + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -357,26 +359,30 @@ export default function AgendaPage() {
               ) : (
                 <div className="space-y-3">
                   {selectedAppts.map(a => (
-                    <div key={a.id} className="tm-bg-card rounded-lg p-3 flex items-start justify-between gap-3">
+                    <div key={a.id} className="tm-bg-card rounded-lg p-3 flex items-start justify-between gap-3 border tm-border">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <Clock size={14} className="text-blue-400" />
                           <span className="tm-text font-medium text-sm">{a.startTime} - {a.endTime}</span>
-                          <span className="px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded text-xs">
-                            #{a.ticket.number}
-                          </span>
+                          <span className="px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded text-xs">#{a.ticket.number}</span>
+                          {a.notifyClient && <span title="Notificação enviada ao cliente" className="text-green-400"><Bell size={13} /></span>}
+                          {a.autoNotify7Days && <span title="Envio automático 7 dias antes" className="text-orange-400"><Timer size={13} /></span>}
                         </div>
                         <p className="tm-text text-sm">{a.ticket.subject}</p>
                         <p className="tm-text-muted text-xs mt-1">
                           <span className="tm-text-secondary">{a.ticket.company.name}</span>
-                          {' • '}
-                          Técnico: <span className="tm-text-secondary">{a.technicianName}</span>
+                          {' • '}Técnico: <span className="tm-text-secondary">{a.technicianName}</span>
                         </p>
                         {a.observation && <p className="tm-text-muted text-xs mt-1 italic">{a.observation}</p>}
                       </div>
-                      <button onClick={() => deleteAppointment(a.id)} className="tm-text-muted hover:text-red-400 transition-colors p-1" title="Excluir">
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="flex gap-1">
+                        <button onClick={() => openEditModal(a)} className="tm-text-muted hover:text-blue-400 transition-colors p-1" title="Editar/Reagendar">
+                          <Pencil size={16} />
+                        </button>
+                        <button onClick={() => deleteAppointment(a.id)} className="tm-text-muted hover:text-red-400 transition-colors p-1" title="Excluir">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -386,89 +392,72 @@ export default function AgendaPage() {
         )}
       </AnimatePresence>
 
-      {/* New Appointment Modal */}
-      {showNewModal && (
+      {/* New / Edit Modal */}
+      {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="tm-bg-main rounded-xl p-6 w-full max-w-lg border tm-border max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold tm-text">Nova Visita Técnica</h2>
-              <button onClick={() => { setShowNewModal(false); setNewError(''); }} className="tm-text-secondary hover:tm-text"><X size={20} /></button>
+              <h2 className="text-xl font-bold tm-text">{editingId ? 'Editar / Reagendar' : 'Nova Visita Técnica'}</h2>
+              <button onClick={() => { setShowModal(false); setFormError(''); }} className="tm-text-secondary hover:tm-text"><X size={20} /></button>
             </div>
 
-            {newError && (
+            {formError && (
               <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg mb-4 text-red-400 text-sm">
-                <AlertTriangle size={16} /> {newError}
+                <AlertTriangle size={16} /> {formError}
               </div>
             )}
 
             <div className="space-y-4">
-              {/* Ticket auto-generated info */}
-              <div className="flex items-center gap-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                <CalIcon size={16} className="text-blue-400" />
-                <div className="text-sm">
-                  <span className="tm-text-secondary">Chamado:</span>{' '}
-                  <span className="tm-text font-medium">{autoTicketNumber}</span>
-                  <span className="mx-2 tm-text-muted">•</span>
-                  <span className="tm-text-secondary">Assunto:</span>{' '}
-                  <span className="tm-text font-medium">Visita Técnica</span>
-                </div>
-              </div>
-
-              {/* Company select */}
-              <div>
-                <label className="flex items-center gap-1.5 text-sm tm-text mb-1">
-                  <Building2 size={14} className="text-blue-400" /> Empresa <span className="text-red-400">*</span>
-                </label>
-                <select
-                  value={newForm.companyId}
-                  onChange={(e) => setNewForm(f => ({ ...f, companyId: e.target.value }))}
-                  className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text"
-                >
-                  <option value="">Selecione a empresa...</option>
-                  {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-
-              {/* Contact select (only when company selected) */}
-              {newForm.companyId && (
-                <div>
-                  <label className="flex items-center gap-1.5 text-sm tm-text mb-1">
-                    <User size={14} className="text-blue-400" /> Solicitante
-                  </label>
-                  {loadingContacts ? (
-                    <div className="flex items-center gap-2 px-3 py-2 tm-text-secondary text-sm">
-                      <Loader2 size={14} className="animate-spin" /> Carregando contatos...
+              {/* Company select (only for new) */}
+              {!editingId && (
+                <>
+                  <div className="flex items-center gap-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                    <CalIcon size={16} className="text-blue-400" />
+                    <div className="text-sm">
+                      <span className="tm-text-secondary">Chamado:</span>{' '}
+                      <span className="tm-text font-medium">(auto)</span>
+                      <span className="mx-2 tm-text-muted">•</span>
+                      <span className="tm-text-secondary">Assunto:</span>{' '}
+                      <span className="tm-text font-medium">Visita Técnica</span>
                     </div>
-                  ) : (
-                    <select
-                      value={newForm.contactId}
-                      onChange={(e) => handleContactSelect(e.target.value)}
-                      className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text"
-                    >
-                      <option value="">Selecione o solicitante...</option>
-                      {contacts.map(c => <option key={c.id} value={c.id}>{c.name} ({c.email})</option>)}
+                  </div>
+                  <div>
+                    <label className="flex items-center gap-1.5 text-sm tm-text mb-1"><Building2 size={14} className="text-blue-400" /> Empresa <span className="text-red-400">*</span></label>
+                    <select value={form.companyId} onChange={(e) => setForm(f => ({ ...f, companyId: e.target.value }))} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text">
+                      <option value="">Selecione a empresa...</option>
+                      {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
+                  </div>
+                  {form.companyId && (
+                    <div>
+                      <label className="flex items-center gap-1.5 text-sm tm-text mb-1"><User size={14} className="text-blue-400" /> Solicitante</label>
+                      {loadingContacts ? (
+                        <div className="flex items-center gap-2 px-3 py-2 tm-text-secondary text-sm"><Loader2 size={14} className="animate-spin" /> Carregando contatos...</div>
+                      ) : (
+                        <select value={form.contactId} onChange={(e) => handleContactSelect(e.target.value)} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text">
+                          <option value="">Selecione o solicitante...</option>
+                          {contacts.map(c => <option key={c.id} value={c.id}>{c.name} ({c.email})</option>)}
+                        </select>
+                      )}
+                    </div>
                   )}
-                </div>
+                </>
               )}
 
               {/* Email preview */}
-              {newForm.requesterEmail && (
+              {form.requesterEmail && (
                 <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm">
                   <Mail size={14} className="text-green-400" />
                   <span className="tm-text-secondary">Email:</span>
-                  <span className="tm-text">{newForm.requesterEmail}</span>
-                  <span className="text-green-400 text-xs ml-auto">✓ Receberá confirmação</span>
+                  <span className="tm-text">{form.requesterEmail}</span>
                 </div>
               )}
 
               {/* Technician select */}
               {(isAdmin || isFinance) && (
                 <div>
-                  <label className="flex items-center gap-1.5 text-sm tm-text mb-1">
-                    <User size={14} className="text-orange-400" /> Técnico <span className="text-red-400">*</span>
-                  </label>
-                  <select value={newForm.technicianId} onChange={(e) => setNewForm(f => ({ ...f, technicianId: e.target.value }))} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text">
+                  <label className="flex items-center gap-1.5 text-sm tm-text mb-1"><User size={14} className="text-orange-400" /> Técnico <span className="text-red-400">*</span></label>
+                  <select value={form.technicianId} onChange={(e) => setForm(f => ({ ...f, technicianId: e.target.value }))} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text">
                     <option value="">Selecione o técnico...</option>
                     {supportUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                   </select>
@@ -477,44 +466,57 @@ export default function AgendaPage() {
 
               {/* Date */}
               <div>
-                <label className="flex items-center gap-1.5 text-sm tm-text mb-1">
-                  <CalIcon size={14} className="text-blue-400" /> Data <span className="text-red-400">*</span>
-                </label>
-                <input type="date" value={newForm.date} onChange={(e) => setNewForm(f => ({ ...f, date: e.target.value }))} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text" />
+                <label className="flex items-center gap-1.5 text-sm tm-text mb-1"><CalIcon size={14} className="text-blue-400" /> Data <span className="text-red-400">*</span></label>
+                <input type="date" value={form.date} onChange={(e) => setForm(f => ({ ...f, date: e.target.value }))} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text" />
               </div>
 
               {/* Time range */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="flex items-center gap-1.5 text-sm tm-text mb-1">
-                    <Clock size={14} className="text-blue-400" /> Início
-                  </label>
-                  <input type="time" value={newForm.startTime} onChange={(e) => setNewForm(f => ({ ...f, startTime: e.target.value }))} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text" />
+                  <label className="flex items-center gap-1.5 text-sm tm-text mb-1"><Clock size={14} className="text-blue-400" /> Início</label>
+                  <input type="time" value={form.startTime} onChange={(e) => setForm(f => ({ ...f, startTime: e.target.value }))} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text" />
                 </div>
                 <div>
-                  <label className="flex items-center gap-1.5 text-sm tm-text mb-1">
-                    <Clock size={14} className="text-blue-400" /> Fim
-                  </label>
-                  <input type="time" value={newForm.endTime} onChange={(e) => setNewForm(f => ({ ...f, endTime: e.target.value }))} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text" />
+                  <label className="flex items-center gap-1.5 text-sm tm-text mb-1"><Clock size={14} className="text-blue-400" /> Fim</label>
+                  <input type="time" value={form.endTime} onChange={(e) => setForm(f => ({ ...f, endTime: e.target.value }))} className="w-full tm-bg-card border tm-border rounded-lg px-3 py-2 tm-text" />
                 </div>
               </div>
 
               {/* Observation */}
               <div>
                 <label className="block text-sm tm-text mb-1">Observação</label>
-                <textarea value={newForm.observation} onChange={(e) => setNewForm(f => ({ ...f, observation: e.target.value }))} rows={2} placeholder="Opcional..." className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text focus:outline-none focus:border-blue-500 resize-none" />
+                <textarea value={form.observation} onChange={(e) => setForm(f => ({ ...f, observation: e.target.value }))} rows={2} placeholder="Opcional..." className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text focus:outline-none focus:border-blue-500 resize-none" />
+              </div>
+
+              {/* Notification flags */}
+              <div className="space-y-3 p-3 bg-white/5 border tm-border rounded-lg">
+                <p className="text-sm font-medium tm-text flex items-center gap-2"><Bell size={14} className="text-blue-400" /> Notificações</p>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" checked={form.notifyClient} onChange={(e) => setForm(f => ({ ...f, notifyClient: e.target.checked }))} className="w-4 h-4 rounded border-gray-600 text-blue-500 focus:ring-blue-500" />
+                  <div>
+                    <span className="text-sm tm-text">Notificar cliente agora</span>
+                    <p className="text-xs tm-text-muted">Envia email de confirmação ao salvar</p>
+                  </div>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" checked={form.autoNotify7Days} onChange={(e) => setForm(f => ({ ...f, autoNotify7Days: e.target.checked }))} className="w-4 h-4 rounded border-gray-600 text-orange-500 focus:ring-orange-500" />
+                  <div>
+                    <span className="text-sm tm-text">Envio automático 7 dias antes</span>
+                    <p className="text-xs tm-text-muted">Lembrete enviado automaticamente quando faltar 7 dias</p>
+                  </div>
+                </label>
               </div>
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => { setShowNewModal(false); setNewError(''); }} className="px-4 py-2 tm-text-secondary hover:tm-text">Cancelar</button>
+              <button onClick={() => { setShowModal(false); setFormError(''); }} className="px-4 py-2 tm-text-secondary hover:tm-text">Cancelar</button>
               <button
-                onClick={createAppointment}
-                disabled={savingNew || !newForm.companyId || !newForm.date || ((isAdmin || isFinance) && !newForm.technicianId)}
+                onClick={saveAppointment}
+                disabled={saving || (!editingId && !form.companyId) || !form.date || ((isAdmin || isFinance) && !form.technicianId)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 flex items-center gap-2"
               >
-                {savingNew ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Plus size={16} />}
-                Agendar Visita
+                {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingId ? <Pencil size={16} /> : <Plus size={16} />}
+                {editingId ? 'Salvar Alterações' : 'Agendar Visita'}
               </button>
             </div>
           </motion.div>

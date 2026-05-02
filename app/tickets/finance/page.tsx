@@ -145,6 +145,15 @@ export default function FinancePage() {
     setPage(1);
   };
 
+  // Fix: reset search when input is cleared
+  const handleSearchInputChange = (value: string) => {
+    setSearchInput(value);
+    if (value === '') {
+      setSearch('');
+      setPage(1);
+    }
+  };
+
   const setPeriod = (period: string) => {
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
@@ -166,6 +175,11 @@ export default function FinancePage() {
     } else {
       setDateFrom('');
       setDateTo('');
+      setSearchInput('');
+      setSearch('');
+      setCompanyFilter('');
+      setHasValue('');
+      setFaturadoFilter('');
       setPage(1);
       return;
     }
@@ -315,18 +329,29 @@ export default function FinancePage() {
     }
   };
 
+  // NF preview modal
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewTicket, setPreviewTicket] = useState<FinanceTicket | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
   const handleViewNF = async (ticket: FinanceTicket) => {
     if (!ticket.notaFiscalPath) return;
+    setLoadingPreview(true);
+    setPreviewTicket(ticket);
     try {
       const res = await fetch(`/api/tickets/${ticket.id}/nf`);
       if (res.ok) {
         const { url } = await res.json();
-        window.open(url, '_blank', 'noopener,noreferrer');
+        setPreviewUrl(url);
       } else {
         alert('Erro ao obter URL do arquivo');
+        setPreviewTicket(null);
       }
     } catch {
       alert('Erro ao visualizar nota fiscal');
+      setPreviewTicket(null);
+    } finally {
+      setLoadingPreview(false);
     }
   };
 
@@ -498,7 +523,7 @@ export default function FinancePage() {
               <input
                 type="text"
                 value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
+                onChange={(e) => handleSearchInputChange(e.target.value)}
                 placeholder="Buscar por nº ou assunto..."
                 className="w-full tm-bg-card border tm-border rounded-lg py-2.5 pl-10 pr-4 tm-text placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
               />
@@ -725,6 +750,52 @@ export default function FinancePage() {
               <button onClick={() => setViewingNotes(null)} className="px-4 py-2 bg-white/10 hover:bg-white/20 tm-text rounded-lg transition-colors">
                 Fechar
               </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* NF Preview Modal */}
+      {previewTicket && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="tm-bg-main rounded-xl w-full max-w-4xl h-[85vh] flex flex-col border tm-border">
+            <div className="flex items-center justify-between p-4 border-b tm-border">
+              <h2 className="text-lg font-bold tm-text">
+                Nota Fiscal - Chamado #{previewTicket.number}
+              </h2>
+              <div className="flex items-center gap-2">
+                {previewUrl && (
+                  <a
+                    href={previewUrl}
+                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm transition-colors"
+                  >
+                    <Download size={14} /> Baixar
+                  </a>
+                )}
+                <button onClick={() => { setPreviewTicket(null); setPreviewUrl(null); }} className="tm-text-secondary hover:tm-text p-1">
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {loadingPreview ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+                </div>
+              ) : previewUrl ? (
+                previewTicket.notaFiscalPath?.endsWith('.xml') ? (
+                  <iframe src={previewUrl} className="w-full h-full border-0" title="NF Preview" />
+                ) : (
+                  <iframe src={previewUrl} className="w-full h-full border-0" title="NF Preview" />
+                )
+              ) : (
+                <div className="flex items-center justify-center h-full tm-text-muted">
+                  Não foi possível carregar a visualização
+                </div>
+              )}
             </div>
           </motion.div>
         </div>

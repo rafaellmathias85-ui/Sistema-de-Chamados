@@ -43,10 +43,12 @@ export async function POST(request: NextRequest) {
 
     const tenantId = session.user.tenantId;
     const userRole = session.user.role;
+    const isClient = userRole === 'CLIENT';
+    const isSupport = userRole === 'SUPPORT';
     const isStaff = ['ADMIN', 'SUPPORT', 'FINANCE'].includes(userRole);
     const hasFinancialAccess = ROLES_WITH_FINANCIAL_ACCESS.includes(userRole);
 
-    /* ─── Proteção financeira ─── */
+    /* ─── Proteção financeira (CLIENT e SUPPORT) ─── */
     if (containsFinancialQuery(message) && !hasFinancialAccess) {
       console.log(`[AI Chat] Bloqueio financeiro: user=${session.user.email} role=${userRole} msg="${message.substring(0, 80)}"`);
       const blockedMsg = `⚠️ **Acesso restrito**\n\nAs informações financeiras são restritas aos perfis **Administrador** e **Financeiro**.\n\nSeu perfil atual: **${userRole}**\n\nSe você precisa acessar dados financeiros, solicite a alteração do seu perfil ao administrador do sistema.`;
@@ -69,7 +71,8 @@ export async function POST(request: NextRequest) {
     // RAG: Buscar tickets relevantes para contexto
     const ticketFilter: Record<string, unknown> = {};
     if (tenantId) ticketFilter.tenantId = tenantId;
-    if (!isStaff) ticketFilter.companyId = session.user.companyId;
+    // CLIENT: só vê tickets da própria empresa
+    if (isClient) ticketFilter.companyId = session.user.companyId;
 
     const keywords = message
       .toLowerCase()
@@ -160,6 +163,16 @@ export async function POST(request: NextRequest) {
       ? 'O usuário possui acesso financeiro. Pode discutir dados financeiros normalmente.'
       : 'REGRA CRÍTICA: O usuário NÃO possui acesso a dados financeiros. Se algum contexto contiver valores monetários, custos, preços de contratos ou dados financeiros, NÃO os mencione. Responda que essas informações são restritas.';
 
+    // Guard adicional para CLIENT
+    const clientGuard = isClient
+      ? `REGRA CRÍTICA PARA CLIENTE: Este usuário é um CLIENTE. Ele SOMENTE pode acessar informações relacionadas à sua empresa (${session.user.companyName || 'empresa vinculada'}). NÃO forneça dados de outros clientes, configurações do sistema, informações administrativas, dados de outros chamados que não pertençam à empresa dele, nem dados financeiros. Se ele perguntar sobre outros clientes ou configurações, informe que o acesso é restrito.`
+      : '';
+
+    // Guard para SUPPORT
+    const supportGuard = isSupport
+      ? 'REGRA PARA SUPORTE: Este usuário é um técnico de suporte. Ele NÃO possui acesso a configurações do sistema (administração) nem ao módulo financeiro. Se perguntarem sobre esses temas, informe que o acesso é restrito ao administrador.'
+      : '';
+
     const systemPrompt = `Você é o **Assistente Técnico Sênior** do Help Desk da Winner Tecnologia.
 
 ## Sua Identidade
@@ -186,11 +199,13 @@ export async function POST(request: NextRequest) {
 
 ## Proteção de Dados
 ${financialGuard}
+${clientGuard}
+${supportGuard}
 
 ## Contexto do Usuário
 - Nome: ${session.user.name}
 - Perfil: ${userRole}
-${isStaff ? '- Acesso: Staff (pode ver todos os tickets do tenant)' : '- Acesso: Apenas tickets da própria empresa'}
+${isClient ? `- Acesso: RESTRITO - Apenas tickets e inventário da empresa ${session.user.companyName || ''}` : isSupport ? '- Acesso: Tickets (todos) e inventário. SEM acesso a configurações e financeiro.' : '- Acesso: Completo (Administrador)'}
 
 ${ragContext}`;
 

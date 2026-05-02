@@ -39,6 +39,8 @@ export default function AdminSettingsPage() {
   const [primaryColor, setPrimaryColor] = useState('#3B82F6');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
+  const [faviconPreview, setFaviconPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
   const loadTenant = useCallback(async () => {
@@ -51,6 +53,13 @@ export default function AdminSettingsPage() {
         setPrimaryColor(data.primaryColor || '#3B82F6');
         setLogoUrl(data.logoUrl || null);
         setLogoPreview(data.logoUrl || null);
+        // Parse settingsJson for extra logos
+        if (data.settingsJson) {
+          try {
+            const s = JSON.parse(data.settingsJson);
+            if (s.faviconUrl) { setFaviconUrl(s.faviconUrl); setFaviconPreview(s.faviconUrl); }
+          } catch {}
+        }
       }
     } catch (err) {
       console.error('Erro ao carregar configurações:', err);
@@ -147,6 +156,32 @@ export default function AdminSettingsPage() {
     }
   };
 
+  const handleExtraUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'favicon') => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    if (file.size > 2 * 1024 * 1024) { setMessage({ type: 'error', text: 'Máximo 2MB' }); return; }
+    setUploading(true);
+    try {
+      const presignRes = await fetch('/api/upload/presigned', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: `${type}_${Date.now()}.${file.name.split('.').pop()}`, contentType: file.type, isPublic: true }),
+      });
+      if (!presignRes.ok) throw new Error('Erro');
+      const { uploadUrl, cloudStoragePath } = await presignRes.json();
+      const headers: Record<string, string> = { 'Content-Type': file.type };
+      if (uploadUrl.includes('content-disposition')) headers['Content-Disposition'] = 'attachment';
+      await fetch(uploadUrl, { method: 'PUT', headers, body: file });
+      const pubRes = await fetch('/api/upload/public-url', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cloudStoragePath, isPublic: true }),
+      });
+      const url = pubRes.ok ? (await pubRes.json()).url : cloudStoragePath;
+      if (type === 'favicon') { setFaviconUrl(url); setFaviconPreview(url); }
+      setMessage({ type: 'success', text: `${type === 'favicon' ? 'Favicon' : 'Arquivo'} enviado!` });
+    } catch { setMessage({ type: 'error', text: 'Erro no upload' }); }
+    finally { setUploading(false); }
+  };
+
   const handleRemoveLogo = () => {
     setLogoUrl(null);
     setLogoPreview(null);
@@ -169,6 +204,7 @@ export default function AdminSettingsPage() {
           name: name.trim(),
           primaryColor,
           logoUrl,
+          settingsJson: JSON.stringify({ faviconUrl }),
         }),
       });
 
@@ -312,6 +348,39 @@ export default function AdminSettingsPage() {
                     <Trash2 size={16} />
                     Remover
                   </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Favicon Upload */}
+      <div className="rounded-xl border border-white/10 p-6" style={{ background: 'var(--bg-card)' }}>
+        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <ImageIcon size={20} className="text-blue-400" />
+          Favicon (Ícone do Site)
+        </h2>
+        <div className="space-y-4">
+          <div className="flex items-start gap-6">
+            <div className="w-16 h-16 rounded-lg border-2 border-dashed border-white/20 flex items-center justify-center overflow-hidden bg-white/5 flex-shrink-0">
+              {faviconPreview ? (
+                <img src={faviconPreview} alt="Favicon" className="w-full h-full object-contain p-1" />
+              ) : (
+                <ImageIcon size={24} className="text-gray-600" />
+              )}
+            </div>
+            <div className="flex-1 space-y-2">
+              <p className="text-sm text-gray-400">Ícone exibido na aba do navegador. Recomendado: 32x32px ou 64x64px, formato PNG.</p>
+              <div className="flex items-center gap-3">
+                <label className="cursor-pointer">
+                  <input type="file" accept="image/png,image/x-icon,image/svg+xml" onChange={(e) => handleExtraUpload(e, 'favicon')} className="hidden" />
+                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm transition">
+                    <Upload size={14} /> {uploading ? 'Enviando...' : 'Upload Favicon'}
+                  </span>
+                </label>
+                {faviconPreview && (
+                  <button onClick={() => { setFaviconUrl(null); setFaviconPreview(null); }} className="text-xs text-red-400 hover:underline">Remover</button>
                 )}
               </div>
             </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/session';
+import { emitEvent } from '@/lib/events';
 
 export const dynamic = 'force-dynamic';
 
@@ -243,6 +244,20 @@ export async function PATCH(request: NextRequest) {
         },
       });
     }
+
+    // Emitir evento de telemetria
+    emitEvent({
+      type: action === 'confirm' ? 'ticket_transferred' : 'ticket_transfer_rejected',
+      entityType: 'ticket',
+      entityId: transfer.ticketId,
+      actorId: session.user.id,
+      actorName: session.user.name || undefined,
+      metadata: {
+        ticketNumber: transfer.ticket?.number,
+        from: transfer.currentResponsible?.name,
+        to: transfer.requestedNewResponsible?.name,
+      },
+    });
 
     return NextResponse.json({ success: true, action });
   } catch (error) {

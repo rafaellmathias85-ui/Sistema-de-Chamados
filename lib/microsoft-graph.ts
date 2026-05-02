@@ -675,6 +675,23 @@ export async function processEmailToTicket(
       ? extractTextFromHtml(email.body.content)
       : email.body.content;
 
+    // Ignorar remetentes indesejados (Microsoft Outlook, Messaging, etc.)
+    const IGNORED_SENDERS = ['microsoft outlook', 'messaging'];
+    const senderNameLower = senderName.toLowerCase().trim();
+    if (IGNORED_SENDERS.some(s => senderNameLower === s || senderNameLower.includes(s))) {
+      await markEmailAsRead(accessToken, config.userEmail, email.id);
+      await prisma.processedEmail.create({
+        data: {
+          messageId: email.id,
+          fromEmail: senderEmail,
+          subject,
+          status: 'ignored',
+        },
+      });
+      console.log(`🚫 Email ignorado (remetente bloqueado): "${senderName}" <${senderEmail}>`);
+      return { success: true, error: `Email ignorado (remetente "${senderName}" na blocklist)` };
+    }
+
     // Ignorar emails enviados pela própria caixa (respostas automáticas do sistema)
     if (senderEmail === config.userEmail.toLowerCase()) {
       // Marcar como lido e registrar como ignorado

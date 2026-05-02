@@ -41,11 +41,14 @@ export async function GET(request: NextRequest) {
       prisma.rmmAlert.count({ where: { acknowledged: false } }).catch(() => 0),
       prisma.systemEvent.findMany({
         where: {
-          createdAt: { gte: last1h },
-          severity: { in: ['error', 'critical'] },
+          createdAt: { gte: last24h },
+          OR: [
+            { severity: { in: ['error', 'critical'] } },
+            { type: { in: ['ticket_deleted', 'ticket_closed', 'ticket_transferred', 'ticket_transfer_rejected', 'status_change', 'assignee_change'] } },
+          ],
         },
         orderBy: { createdAt: 'desc' },
-        take: 20,
+        take: 50,
         select: { id: true, type: true, severity: true, entityType: true, actorName: true, createdAt: true, metadata: true },
       }),
       prisma.processedEmail.count({ where: { processedAt: { gte: last24h }, status: 'processed' } }).catch(() => 0),

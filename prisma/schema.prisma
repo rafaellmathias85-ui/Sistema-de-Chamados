@@ -796,6 +796,11 @@ model Appointment {
   requesterName   String?  // Nome do solicitante
   requesterEmail  String?  // Email do solicitante
   
+  // Notificação ao cliente
+  notifyClient      Boolean  @default(false) // Enviar email ao salvar
+  autoNotify7Days   Boolean  @default(false) // Enviar automaticamente 7 dias antes
+  reminderSent      Boolean  @default(false) // Lembrete já enviado
+  
   // Multi-tenancy
   tenantId      String?
   tenant        Tenant?  @relation(fields: [tenantId], references: [id])
@@ -808,6 +813,7 @@ model Appointment {
   
   @@unique([technicianId, date, startTime])
   @@index([tenantId])
+  @@index([date, autoNotify7Days, reminderSent])
 }
 
 // Histórico de alterações de tickets (audit trail)
