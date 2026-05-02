@@ -96,35 +96,9 @@ export default function AdminSettingsPage() {
     setMessage(null);
 
     try {
-      // Get presigned URL
-      const presignRes = await fetch('/api/upload/presigned', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: `logo_${Date.now()}.${file.name.split('.').pop()}`,
-          contentType: file.type,
-          isPublic: true,
-        }),
-      });
-
-      if (!presignRes.ok) throw new Error('Erro ao gerar URL de upload');
-      const { uploadUrl, cloudStoragePath } = await presignRes.json();
-
-      // Upload to S3
-      const headers: Record<string, string> = {
-        'Content-Type': file.type,
-      };
-      if (uploadUrl.includes('content-disposition')) {
-        headers['Content-Disposition'] = 'attachment';
-      }
-
-      const uploadRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers,
-        body: file,
-      });
-
-      if (!uploadRes.ok) throw new Error('Erro ao fazer upload');
+      // Use unified upload helper (auto-detects S3 vs Local storage)
+      const { uploadFile } = await import('@/lib/upload-helper');
+      const { cloudStoragePath } = await uploadFile(file, true);
 
       // Get public URL from the API
       const publicUrlRes = await fetch('/api/upload/public-url', {
@@ -136,7 +110,6 @@ export default function AdminSettingsPage() {
         const { url } = await publicUrlRes.json();
         setLogoUrl(url);
       } else {
-        // Fallback: save cloudStoragePath
         setLogoUrl(cloudStoragePath);
       }
       
@@ -162,15 +135,8 @@ export default function AdminSettingsPage() {
     if (file.size > 2 * 1024 * 1024) { setMessage({ type: 'error', text: 'Máximo 2MB' }); return; }
     setUploading(true);
     try {
-      const presignRes = await fetch('/api/upload/presigned', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: `${type}_${Date.now()}.${file.name.split('.').pop()}`, contentType: file.type, isPublic: true }),
-      });
-      if (!presignRes.ok) throw new Error('Erro');
-      const { uploadUrl, cloudStoragePath } = await presignRes.json();
-      const headers: Record<string, string> = { 'Content-Type': file.type };
-      if (uploadUrl.includes('content-disposition')) headers['Content-Disposition'] = 'attachment';
-      await fetch(uploadUrl, { method: 'PUT', headers, body: file });
+      const { uploadFile } = await import('@/lib/upload-helper');
+      const { cloudStoragePath } = await uploadFile(file, true);
       const pubRes = await fetch('/api/upload/public-url', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cloudStoragePath, isPublic: true }),

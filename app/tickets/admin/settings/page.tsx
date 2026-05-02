@@ -1340,26 +1340,14 @@ export default function EmailSettingsPage() {
                               if (!file) return;
                               if (file.size > 2 * 1024 * 1024) { alert('Arquivo muito grande (máx 2MB)'); return; }
                               try {
-                                const presignRes = await fetch('/api/upload/presigned', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ fileName: file.name, contentType: file.type }),
-                                });
-                                if (!presignRes.ok) { alert('Erro ao gerar URL de upload'); return; }
-                                const { uploadUrl, cloudStoragePath } = await presignRes.json();
-                                const headers: Record<string, string> = { 'Content-Type': file.type };
-                                if (uploadUrl.includes('content-disposition')) {
-                                  headers['Content-Disposition'] = 'attachment';
-                                }
-                                const uploadRes = await fetch(uploadUrl, { method: 'PUT', headers, body: file });
-                                if (!uploadRes.ok) { alert('Erro no upload'); return; }
+                                const { uploadFile } = await import('@/lib/upload-helper');
+                                const { cloudStoragePath } = await uploadFile(file, true);
                                 // Get public URL
                                 const viewRes = await fetch(`/api/upload/url?path=${encodeURIComponent(cloudStoragePath)}&public=true`);
                                 if (viewRes.ok) {
                                   const { url } = await viewRes.json();
                                   setConfig({ ...config, templateLogoUrl: url });
                                 } else {
-                                  // Fallback: construct public URL
                                   setConfig({ ...config, templateLogoUrl: cloudStoragePath });
                                 }
                                 alert('Logo enviado com sucesso!');
