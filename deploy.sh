@@ -118,16 +118,35 @@ ECOEOF
   pm2 list
   pm2 describe winner-helpdesk 2>/dev/null | grep "exec cwd" || true
 
+  # Diagnósticos do build output
+  echo "[Deploy] === DIAGNÓSTICOS ==="
+  echo "[Deploy] Build directory:"
+  ls -la .next/ 2>/dev/null | head -15
+  echo "[Deploy] Server app directory:"
+  ls -la .next/server/app/ 2>/dev/null | head -15
+  echo "[Deploy] Build ID:"
+  cat .next/BUILD_ID 2>/dev/null || echo "BUILD_ID não encontrado!"
+  echo "[Deploy] next.config.js final:"
+  cat next.config.js
+  echo "[Deploy] .env vars (filtradas):"
+  grep -E "^(NEXT_|NODE_ENV|PORT)" .env 2>/dev/null || echo "Nenhuma variável NEXT_ encontrada"
+  echo "[Deploy] === FIM DIAGNÓSTICOS ==="
+
   # Health check - verificar se o app responde
   echo "[Deploy] Aguardando app iniciar..."
-  sleep 5
+  sleep 8
   for i in 1 2 3 4 5; do
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://localhost:3000/login 2>/dev/null || echo "000")
-    if [ "$HTTP_CODE" != "000" ] && [ "$HTTP_CODE" != "502" ]; then
-      echo "[Deploy] ✅ App respondendo (HTTP $HTTP_CODE)"
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+      echo "[Deploy] ✅ App respondendo corretamente (HTTP $HTTP_CODE)"
       break
+    elif [ "$HTTP_CODE" = "404" ]; then
+      echo "[Deploy] ⚠️ Tentativa $i - HTTP 404 (páginas não encontradas)"
+      echo "[Deploy] PM2 logs (últimas 20 linhas):"
+      pm2 logs winner-helpdesk --nostream --lines 20 2>/dev/null || true
+    else
+      echo "[Deploy] Tentativa $i - aguardando... (HTTP $HTTP_CODE)"
     fi
-    echo "[Deploy] Tentativa $i - aguardando... (HTTP $HTTP_CODE)"
     sleep 3
   done
 
