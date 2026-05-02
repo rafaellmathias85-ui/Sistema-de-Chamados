@@ -31,6 +31,11 @@ import ResolveTicketModal from '@/components/resolve-ticket-modal';
 import EmailHtmlViewer from '@/components/email-html-viewer';
 import TicketReplyBlock from '@/components/ticket-reply-block';
 
+interface PartnerCompany {
+  id: string;
+  name: string;
+}
+
 interface TicketMessage {
   id: string;
   content: string;
@@ -103,6 +108,12 @@ export default function TicketDetailPage() {
   const [supportUsers, setSupportUsers] = useState<{ id: string; name: string; role: string }[]>([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Partner modal state
+  const [showPartnerModal, setShowPartnerModal] = useState(false);
+  const [partnerCompanies, setPartnerCompanies] = useState<PartnerCompany[]>([]);
+  const [selectedPartner, setSelectedPartner] = useState('');
+  const [partnerNote, setPartnerNote] = useState('');
+  const [loadingPartners, setLoadingPartners] = useState(false);
 
   const isStaff = session?.user?.role === 'ADMIN' || session?.user?.role === 'SUPPORT' || session?.user?.role === 'FINANCE';
   const isAdmin = session?.user?.role === 'ADMIN';
@@ -168,23 +179,26 @@ export default function TicketDetailPage() {
     try {
       // 1-3. Upload do arquivo (S3 presigned ou local direct)
       const { uploadFile } = await import('@/lib/upload-helper');
+      const contentType = file.type || 'application/octet-stream';
       const { cloudStoragePath } = await uploadFile(file, false);
 
       // 4. Registrar anexo no ticket
+      const attachBody = {
+        fileName: file.name,
+        fileSize: Number(file.size) || 0,
+        fileType: contentType,
+        cloudStoragePath,
+        isPublic: false,
+      };
       const attachRes = await fetch(`/api/tickets/${params.id}/attachments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type,
-          cloudStoragePath,
-          isPublic: false,
-        }),
+        body: JSON.stringify(attachBody),
       });
 
       if (!attachRes.ok) {
-        throw new Error('Erro ao registrar anexo');
+        const errData = await attachRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'Erro ao registrar anexo');
       }
 
       fetchAttachments();
@@ -260,6 +274,23 @@ export default function TicketDetailPage() {
   };
 
   const handleUpdateStatus = async (newStatus: string) => {
+    // If changing to IN_PARTNER, open partner selection modal
+    if (newStatus === 'IN_PARTNER') {
+      setLoadingPartners(true);
+      setShowPartnerModal(true);
+      setSelectedPartner('');
+      setPartnerNote('');
+      try {
+        const res = await fetch('/api/companies?limit=500&clientType=PARCEIRO');
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : data.companies || [];
+          setPartnerCompanies(list);
+        }
+      } catch { setPartnerCompanies([]); }
+      finally { setLoadingPartners(false); }
+      return;
+    }
     setUpdating(true);
     try {
       const res = await fetch(`/api/tickets/${params.id}`, {
@@ -273,6 +304,37 @@ export default function TicketDetailPage() {
       }
     } catch (error) {
       console.error('Error updating status:', error);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleConfirmPartner = async () => {
+    if (!selectedPartner) return;
+    const partnerName = partnerCompanies.find(c => c.id === selectedPartner)?.name || '';
+    setUpdating(true);
+    try {
+      // 1. Update status to IN_PARTNER
+      const res = await fetch(`/api/tickets/${params.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'IN_PARTNER' }),
+      });
+      if (!res.ok) throw new Error('Falha ao atualizar status');
+
+      // 2. Add internal note about partner
+      const noteContent = `🤝 Chamado encaminhado para parceiro: **${partnerName}**${partnerNote ? `\n\nObservação: ${partnerNote}` : ''}`;
+      await fetch(`/api/tickets/${params.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: noteContent, isInternal: true }),
+      });
+
+      setShowPartnerModal(false);
+      fetchTicket();
+    } catch (error) {
+      console.error('Error setting partner:', error);
+      alert('Erro ao encaminhar para parceiro');
     } finally {
       setUpdating(false);
     }
@@ -952,6 +1014,64 @@ export default function TicketDetailPage() {
               >{deleting ? 'Excluindo...' : 'Confirmar Exclusão'}</button>
               <button
                 onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2.5 tm-bg-card border tm-border tm-text rounded-lg text-sm transition-colors hover:opacity-80"
+              >Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de seleção de parceiro */}
+      {showPartnerModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="tm-bg-card rounded-2xl border border-violet-500/30 shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-violet-500/20 rounded-full"><Building2 className="text-violet-400" size={22} /></div>
+              <h3 className="text-lg font-semibold tm-text">Encaminhar para Parceiro</h3>
+            </div>
+            <p className="tm-text-secondary text-sm mb-4">
+              Selecione o parceiro para o qual este chamado será encaminhado. Uma nota interna será registrada automaticamente.
+            </p>
+            {loadingPartners ? (
+              <div className="flex items-center justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-violet-400" /></div>
+            ) : partnerCompanies.length === 0 ? (
+              <div className="py-4 text-center">
+                <p className="tm-text-muted text-sm">Nenhuma empresa cadastrada como &quot;Parceiro&quot;.</p>
+                <p className="tm-text-muted text-xs mt-1">Cadastre empresas com tipo &quot;Parceiro&quot; na seção de Empresas.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium tm-text-secondary mb-1">Empresa Parceira *</label>
+                  <select
+                    value={selectedPartner}
+                    onChange={(e) => setSelectedPartner(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 tm-text text-sm focus:border-violet-500 outline-none"
+                  >
+                    <option value="">Selecione um parceiro...</option>
+                    {partnerCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium tm-text-secondary mb-1">Observação (opcional)</label>
+                  <textarea
+                    value={partnerNote}
+                    onChange={(e) => setPartnerNote(e.target.value)}
+                    placeholder="Motivo do encaminhamento, instruções, etc."
+                    rows={3}
+                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 tm-text text-sm focus:border-violet-500 outline-none resize-none"
+                  />
+                </div>
+              </div>
+            )}
+            <div className="flex gap-3 mt-5">
+              <button
+                onClick={handleConfirmPartner}
+                disabled={updating || !selectedPartner}
+                className="flex-1 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              >{updating ? 'Encaminhando...' : 'Confirmar Parceiro'}</button>
+              <button
+                onClick={() => setShowPartnerModal(false)}
                 className="px-4 py-2.5 tm-bg-card border tm-border tm-text rounded-lg text-sm transition-colors hover:opacity-80"
               >Cancelar</button>
             </div>

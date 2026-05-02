@@ -82,10 +82,17 @@ export async function POST(
       return NextResponse.json({ error: 'Sem permissão' }, { status: 403 });
     }
 
-    const body = await request.json();
-    const { fileName, fileSize, fileType, cloudStoragePath, isPublic = false } = body;
+    let body: any;
+    try {
+      body = await request.json();
+    } catch (parseErr) {
+      console.error('Erro ao parsear JSON do anexo:', parseErr);
+      return NextResponse.json({ error: 'JSON inválido no corpo da requisição' }, { status: 400 });
+    }
+    const { fileName, fileType, cloudStoragePath, isPublic = false } = body;
+    const fileSize = typeof body.fileSize === 'number' ? body.fileSize : parseInt(String(body.fileSize || '0'), 10) || 0;
 
-    if (!fileName || !fileSize || !fileType || !cloudStoragePath) {
+    if (!fileName || !fileType || !cloudStoragePath) {
       return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 });
     }
 

@@ -765,15 +765,21 @@ export default function FinancePage() {
               </h2>
               <div className="flex items-center gap-2">
                 {previewUrl && (
-                  <a
-                    href={previewUrl}
-                    download
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    onClick={() => {
+                      const a = document.createElement('a');
+                      a.href = previewUrl;
+                      a.download = `nf_chamado_${previewTicket?.number || ''}.pdf`;
+                      a.target = '_blank';
+                      a.rel = 'noopener noreferrer';
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }}
                     className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm transition-colors"
                   >
                     <Download size={14} /> Baixar
-                  </a>
+                  </button>
                 )}
                 <button onClick={() => { setPreviewTicket(null); setPreviewUrl(null); }} className="tm-text-secondary hover:tm-text p-1">
                   <X size={20} />

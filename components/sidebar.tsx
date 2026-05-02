@@ -28,6 +28,7 @@ import {
   Sparkles,
   HeartPulse,
   Archive,
+  Palette,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -113,6 +114,7 @@ export default function Sidebar({ user }: SidebarProps) {
     { menuKey: 'admin', name: 'Administração', href: '/tickets/admin', icon: Settings, section: 'sistema' },
     { menuKey: 'admin-email', name: 'Config. Email', href: '/tickets/admin/settings', icon: MessageCircle, section: 'sistema' },
     { menuKey: 'admin-company', name: 'Config. Empresa', href: '/tickets/admin/company', icon: Building2, section: 'sistema' },
+    { menuKey: 'admin-statuses', name: 'Status de Chamados', href: '/tickets/admin/statuses', icon: Palette, section: 'sistema' },
     { menuKey: 'archive', name: 'Arquivo de Chamados', href: '/tickets/archive', icon: Archive, section: 'sistema' },
     { menuKey: 'admin-whatsapp', name: 'WhatsApp', href: '/tickets/admin/whatsapp', icon: MessageCircle, section: 'sistema' },
     { menuKey: 'monitoring', name: 'Monitoramento', href: '/tickets/monitoring', icon: HeartPulse, section: 'sistema' },

@@ -4,13 +4,18 @@ import { getSession } from '@/lib/session';
 export const dynamic = 'force-dynamic';
 
 const ALLOWED_TYPES = [
-  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp', 'image/tiff', 'image/x-icon',
   'application/pdf',
   'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'text/plain', 'text/csv', 'text/xml',
-  'application/xml',
-  'application/zip', 'application/x-rar-compressed',
+  'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain', 'text/csv', 'text/xml', 'text/html',
+  'application/xml', 'application/json',
+  'application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed', 'application/gzip',
+  'application/octet-stream',
+  'video/mp4', 'video/mpeg', 'video/quicktime', 'video/webm',
+  'audio/mpeg', 'audio/wav', 'audio/ogg',
+  'message/rfc822', 'application/vnd.ms-outlook',
 ];
 
 export async function POST(request: NextRequest) {
