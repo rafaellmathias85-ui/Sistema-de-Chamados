@@ -121,25 +121,41 @@ if command -v pm2 &> /dev/null; then
   echo "[Deploy] Processos PM2 antes:"
   pm2 list
 
-  # Encontrar o caminho absoluto do binário next
-  NEXT_BIN="$(pwd)/node_modules/.bin/next"
-  if [ ! -f "$NEXT_BIN" ] && [ ! -L "$NEXT_BIN" ]; then
-    # Fallback: usar o path do next dentro do pacote
-    NEXT_BIN="$(pwd)/node_modules/next/dist/bin/next"
+  # Encontrar o binário next de forma robusta
+  NEXT_BIN=""
+  for candidate in \
+    "$(pwd)/node_modules/.bin/next" \
+    "$(pwd)/node_modules/next/dist/bin/next" \
+    "$(which next 2>/dev/null)"; do
+    if [ -e "$candidate" ]; then
+      NEXT_BIN="$candidate"
+      break
+    fi
+  done
+
+  # Fallback final: usar node com require
+  if [ -z "$NEXT_BIN" ]; then
+    echo "[Deploy] ⚠️ Next binary não encontrado! Usando node -e require approach"
+    NEXT_BIN="node"
+    NEXT_ARGS="-e \"require('next/dist/bin/next')\" start -p 3000"
+  else
+    echo "[Deploy] Next binary: $NEXT_BIN"
+    NEXT_ARGS="start -p 3000"
   fi
 
-  echo "[Deploy] Next binary: $NEXT_BIN"
-  echo "[Deploy] Next binary existe? $([ -e \"$NEXT_BIN\" ] && echo 'SIM' || echo 'NÃO')"
-  ls -la "$NEXT_BIN" 2>/dev/null || echo "Binário não encontrado!"
+  echo "[Deploy] Binário: $NEXT_BIN"
+  echo "[Deploy] Args: $NEXT_ARGS"
 
-  # Criar ecosystem com node executando next diretamente
-  # Isso evita o problema de 'next: not found' no PATH do PM2
+  # Criar ecosystem usando node como interpretador (mais robusto com PM2)
+  NODE_BIN="$(which node)"
+  NEXT_CLI="$(pwd)/node_modules/next/dist/bin/next"
+  
   cat > "$APP_DIR/ecosystem.config.js" << ECOEOF
 module.exports = {
   apps: [{
     name: 'winner-helpdesk',
-    script: '${NEXT_BIN}',
-    args: 'start -p 3000',
+    script: '${NODE_BIN}',
+    args: '${NEXT_CLI} start -p 3000',
     cwd: '${APP_DIR}',
     exec_mode: 'fork',
     instances: 1,
