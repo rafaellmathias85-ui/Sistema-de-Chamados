@@ -127,6 +127,11 @@ function WorkspacePage() {
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [resolveTicketId, setResolveTicketId] = useState<string | null>(null);
+  const [showPartnerModal, setShowPartnerModal] = useState(false);
+  const [partnerCompanies, setPartnerCompanies] = useState<{id:string;name:string}[]>([]);
+  const [selectedPartner, setSelectedPartner] = useState('');
+  const [partnerNote, setPartnerNote] = useState('');
+  const [loadingPartners, setLoadingPartners] = useState(false);
   const [view, setView] = useState<ViewType>('all');
   const [search, setSearch] = useState('');
   const [replyContent, setReplyContent] = useState('');
@@ -146,19 +151,40 @@ function WorkspacePage() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedId || !e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
+
+    if (file.size > 100 * 1024 * 1024) {
+      alert('Arquivo muito grande. Máximo 100MB.');
+      return;
+    }
+
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
+      // 1. Upload para S3 via helper
+      const { uploadFile } = await import('@/lib/upload-helper');
+      const { cloudStoragePath } = await uploadFile(file, false);
+
+      // 2. Registrar no banco
       const res = await fetch(`/api/tickets/${selectedId}/attachments`, {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type || 'application/octet-stream',
+          cloudStoragePath,
+          isPublic: false,
+        }),
       });
       if (res.ok) {
         loadDetail(selectedId);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.error('Erro ao registrar anexo:', err);
+        alert('Erro ao enviar anexo. Tente novamente.');
       }
     } catch (err) {
       console.error('Erro ao enviar anexo:', err);
+      alert('Erro ao enviar anexo. Tente novamente.');
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -309,12 +335,56 @@ function WorkspacePage() {
     setSending(false);
   };
 
+  const handleConfirmPartner = async () => {
+    if (!selectedId || !selectedPartner) return;
+    setLoadingPartners(true);
+    try {
+      const res = await fetch(`/api/tickets/${selectedId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'IN_PARTNER' }),
+      });
+      if (res.ok) {
+        const partnerName = partnerCompanies.find(c => c.id === selectedPartner)?.name || 'Parceiro';
+        const noteContent = `Chamado encaminhado para parceiro: ${partnerName}${partnerNote ? `\nObservação: ${partnerNote}` : ''}`;
+        await fetch(`/api/tickets/${selectedId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: noteContent, isInternal: true }),
+        });
+        loadDetail(selectedId);
+        loadTickets();
+      }
+    } catch (err) {
+      console.error('Erro ao atualizar parceiro:', err);
+    }
+    setShowPartnerModal(false);
+    setSelectedPartner('');
+    setPartnerNote('');
+    setLoadingPartners(false);
+  };
+
   const updateTicketField = async (field: string, value: string) => {
     if (!selectedId) return;
-    // Intercept: RESOLVED opens resolve modal, CLOSED blocked
+    // Intercept: RESOLVED opens resolve modal, CLOSED blocked, IN_PARTNER opens partner modal
     if (field === 'status') {
       if (value === 'RESOLVED' && detail?.status !== 'RESOLVED' && detail?.status !== 'CLOSED') {
         setResolveTicketId(selectedId);
+        return;
+      }
+      if (value === 'IN_PARTNER' && detail?.status !== 'IN_PARTNER') {
+        setLoadingPartners(true);
+        setShowPartnerModal(true);
+        try {
+          const res = await fetch('/api/companies?clientType=PARCEIRO');
+          if (res.ok) {
+            const data = await res.json();
+            setPartnerCompanies(Array.isArray(data) ? data : (data.companies || []));
+          }
+        } catch (err) {
+          console.error('Erro ao carregar parceiros:', err);
+        }
+        setLoadingPartners(false);
         return;
       }
       if (value === 'CLOSED') return;
@@ -782,6 +852,65 @@ function WorkspacePage() {
           onClose={() => setResolveTicketId(null)}
           onSuccess={() => { setResolveTicketId(null); loadDetail(selectedId!); loadTickets(); }}
         />
+      )}
+
+      {/* Partner Selection Modal */}
+      {showPartnerModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="tm-bg-card rounded-xl border tm-border p-6 w-full max-w-md shadow-2xl">
+            <h3 className="text-lg font-semibold tm-text mb-4">Selecionar Parceiro</h3>
+            {loadingPartners ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 size={24} className="animate-spin text-cyan-400" />
+                <span className="ml-2 tm-text-muted">Carregando parceiros...</span>
+              </div>
+            ) : partnerCompanies.length === 0 ? (
+              <div className="text-center py-6">
+                <p className="tm-text-muted text-sm">Nenhuma empresa do tipo &quot;Parceiro&quot; cadastrada.</p>
+                <p className="tm-text-muted text-xs mt-2">Cadastre empresas como Parceiro em Admin → Empresas.</p>
+              </div>
+            ) : (
+              <>
+                <label className="block text-sm font-medium tm-text mb-1">Empresa Parceira</label>
+                <select
+                  value={selectedPartner}
+                  onChange={(e) => setSelectedPartner(e.target.value)}
+                  className="w-full tm-bg-main border tm-border rounded-lg px-3 py-2 text-sm tm-text mb-4"
+                >
+                  <option value="">Selecione...</option>
+                  {partnerCompanies.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <label className="block text-sm font-medium tm-text mb-1">Observação (opcional)</label>
+                <textarea
+                  value={partnerNote}
+                  onChange={(e) => setPartnerNote(e.target.value)}
+                  rows={3}
+                  className="w-full tm-bg-main border tm-border rounded-lg px-3 py-2 text-sm tm-text mb-4 resize-none"
+                  placeholder="Motivo do encaminhamento..."
+                />
+              </>
+            )}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setShowPartnerModal(false); setSelectedPartner(''); setPartnerNote(''); }}
+                className="px-4 py-2 text-sm tm-text-muted hover:tm-text rounded-lg border tm-border"
+              >
+                Cancelar
+              </button>
+              {partnerCompanies.length > 0 && (
+                <button
+                  onClick={handleConfirmPartner}
+                  disabled={!selectedPartner || loadingPartners}
+                  className="px-4 py-2 text-sm text-white bg-purple-600 hover:bg-purple-500 rounded-lg disabled:opacity-50"
+                >
+                  Confirmar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

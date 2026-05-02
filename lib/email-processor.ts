@@ -476,6 +476,22 @@ export async function processIncomingEmails(): Promise<ProcessResult> {
             throw new Error('Email do remetente não encontrado');
           }
 
+          // Ignorar emails automáticos de sistemas (Microsoft Outlook, Messaging, etc.)
+          const ignoredSenders = ['microsoft outlook', 'messaging', 'postmaster', 'mailer-daemon', 'noreply', 'no-reply'];
+          const senderNameLower = (fromName || '').toLowerCase().trim();
+          const senderEmailLower = fromEmail.toLowerCase().trim();
+          const isIgnoredSender = ignoredSenders.some(s => senderNameLower === s || senderEmailLower.startsWith(s + '@'));
+          if (isIgnoredSender) {
+            console.log(`[Email] Ignorando email de remetente automático: "${fromName}" <${fromEmail}>`);
+            // Marcar como processado sem criar ticket
+            await prisma.processedEmail.create({
+              data: { messageId: msg.id || `ignored-${Date.now()}`, subject, fromEmail, processedAt: new Date() },
+            }).catch(() => {});
+            result.processed++;
+            result.details.push({ messageId: msg.id || '', from: fromEmail, subject, status: 'ignored', error: `Remetente auto ignorado: ${fromName || fromEmail}` });
+            continue;
+          }
+
           // Verificar se é resposta a um ticket existente
           let existingTicketId: string | null = null;
           let existingTicketNumber: number | null = null;
