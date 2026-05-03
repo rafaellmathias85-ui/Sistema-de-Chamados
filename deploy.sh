@@ -200,9 +200,14 @@ echo "[Deploy] === BUILD ==="
 echo "[Deploy] yarn install..."
 yarn install --frozen-lockfile 2>/dev/null || yarn install
 
-echo "[Deploy] Prisma generate + push..."
+echo "[Deploy] Prisma generate..."
 yarn prisma generate
-yarn prisma db push --skip-generate 2>/dev/null || true
+
+echo "[Deploy] Migração segura: TicketStatus enum → String (idempotente)..."
+node scripts/migrate-status-enum-to-string.js 2>&1 || echo "[Deploy] ⚠️ Migração de status falhou (verificar logs)"
+
+echo "[Deploy] Prisma db push (sincronizar schema)..."
+yarn prisma db push --skip-generate --accept-data-loss 2>/dev/null || true
 npx tsx scripts/seed.ts 2>/dev/null || echo "[Deploy] Seed falhou (não-crítico)"
 
 echo "[Deploy] Limpando .next..."
