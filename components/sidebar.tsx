@@ -122,6 +122,7 @@ export default function Sidebar({ user }: SidebarProps) {
     // Grupo "Administração" (parent)
     { menuKey: 'admin', name: 'Administração', href: '/tickets/admin', icon: Settings, section: 'sistema' },
     // Submenus de Administração (parentKey: 'admin')
+    { menuKey: 'admin-panel', name: 'Painel Admin', href: '/tickets/admin', icon: Settings, section: 'sistema', parentKey: 'admin' },
     { menuKey: 'admin-company', name: 'Config. Empresa', href: '/tickets/admin/company', icon: Building2, section: 'sistema', parentKey: 'admin' },
     { menuKey: 'admin-email', name: 'Config. Email', href: '/tickets/admin/settings', icon: MessageCircle, section: 'sistema', parentKey: 'admin' },
     { menuKey: 'admin-statuses', name: 'Status de Chamados', href: '/tickets/admin/statuses', icon: Palette, section: 'sistema', parentKey: 'admin' },
@@ -153,6 +154,7 @@ export default function Sidebar({ user }: SidebarProps) {
         return isAdmin || isSupport || isFinance;
       case 'telemetry':
       case 'admin':
+      case 'admin-panel':
       case 'admin-email':
       case 'admin-company':
       case 'admin-statuses':
