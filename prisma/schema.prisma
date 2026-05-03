@@ -61,15 +61,9 @@ enum Role {
   SPECIAL
 }
 
-enum TicketStatus {
-  OPEN
-  IN_PROGRESS
-  IN_PARTNER        // Encaminhado para parceiro externo
-  PAUSED            // Pausado/Aguardando
-  AWAITING_CLIENT   // Aguardando cliente
-  RESOLVED
-  CLOSED
-}
+// TicketStatus: migrado de enum para String em v10 (Item 4 - Opção A)
+// Permite status totalmente personalizáveis via /tickets/admin/statuses
+// Valores padrão: OPEN, IN_PROGRESS, IN_PARTNER, PAUSED, AWAITING_CLIENT, RESOLVED, CLOSED
 
 enum ClientType {
   CONTRATO
@@ -509,7 +503,7 @@ model Ticket {
   subject     String
   description String
   descriptionHtml String?    @db.Text // Conteúdo HTML do email (quando source='email')
-  status      TicketStatus   @default(OPEN)
+  status      String         @default("OPEN")
   priority    TicketPriority @default(MEDIUM)
   source      String?        // Origem: 'web', 'email', 'whatsapp', 'phone'
   

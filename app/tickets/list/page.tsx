@@ -578,25 +578,9 @@ export default function TicketListPage() {
                         <p className="tm-text">{ticket.assignee?.name || '-'}</p>
                       </td>
                       <td className="px-4 py-4">{getPriorityBadge(ticket.priority)}</td>
-                      <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                        {isStaff ? (
-                          <select
-                            value={ticket.status}
-                            onChange={(e) => handleStatusChange(ticket.id, e.target.value, ticket.status)}
-                            disabled={changingStatus === ticket.id}
-                            className="tm-bg-card border tm-border rounded px-2 py-1 text-xs tm-text focus:outline-none focus:border-blue-500/50 cursor-pointer disabled:opacity-50"
-                          >
-                            <option value="OPEN">Aberto</option>
-                            <option value="IN_PROGRESS">Em Andamento</option>
-                            <option value="IN_PARTNER">Com Parceiro</option>
-                            <option value="PAUSED">Pausado</option>
-                            <option value="AWAITING_CLIENT">Aguard. Cliente</option>
-                            <option value="RESOLVED">Resolvido</option>
-                            <option value="CLOSED" disabled={ticket.status !== 'CLOSED'}>Fechado</option>
-                          </select>
-                        ) : (
-                          getStatusBadge(ticket.status)
-                        )}
+                      <td className="px-4 py-4">
+                        {/* Status read-only — alteração de status feita na tela de detalhes do chamado */}
+                        {getStatusBadge(ticket.status)}
                       </td>
                       <td className="px-4 py-4 hidden lg:table-cell">
                         <p className="text-sm tm-text-secondary">{formatDate(ticket.createdAt)}</p>

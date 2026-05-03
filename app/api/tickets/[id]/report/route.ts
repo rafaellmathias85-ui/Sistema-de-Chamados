@@ -169,7 +169,8 @@ export async function GET(
 function buildReportHtml(ticket: any, messages: any[], tenant: any) {
   const logoSrc = tenant?.logoUrl ? tenant.logoUrl : getLogoBase64();
   // Nome da empresa para o relatório: prioriza env var > tenant do banco > fallback
-  const companyName = process.env.REPORT_COMPANY_NAME || tenant?.name || 'Winner Tecnologia';
+  // Nome fixo para o relatório PDF — não usar tenant.name para evitar nomes herdados de cadastros antigos
+  const companyName = process.env.REPORT_COMPANY_NAME || 'Winner Tecnologia';
 
   const resStart = ticket.serviceStartedAt || ticket.createdAt;
   const resEnd = ticket.serviceEndedAt || ticket.resolvedAt || ticket.closedAt;

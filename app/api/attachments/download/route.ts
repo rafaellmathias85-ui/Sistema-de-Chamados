@@ -45,9 +45,23 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // Para imagens inline, usar inline disposition e cache longo
-    const isImage = mimeType.startsWith('image/');
-    const disposition = isImage ? 'inline' : `attachment; filename="file${ext}"`;
+    // Tipos que devem ser exibidos inline (preview no navegador):
+    // - imagens: para anexos inline em emails
+    // - PDF: para visualizar notas fiscais e documentos no <iframe>
+    // - XML / texto plano: para inspecionar NFe e logs
+    // Demais tipos forçam download via "attachment".
+    // Permite override explícito via querystring: ?disposition=inline | attachment
+    const dispositionOverride = request.nextUrl.searchParams.get('disposition');
+    const inlineByDefault =
+      mimeType.startsWith('image/') ||
+      mimeType === 'application/pdf' ||
+      mimeType === 'application/xml' ||
+      mimeType === 'text/xml' ||
+      mimeType.startsWith('text/');
+    const useInline =
+      dispositionOverride === 'inline' ||
+      (dispositionOverride !== 'attachment' && inlineByDefault);
+    const disposition = useInline ? 'inline' : `attachment; filename="file${ext}"`;
 
     return new Response(webStream, {
       status: 200,

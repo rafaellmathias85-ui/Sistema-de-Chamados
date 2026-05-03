@@ -29,6 +29,8 @@ import {
   HeartPulse,
   Archive,
   Palette,
+  ChevronDown,
+  ChevronRight,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -57,6 +59,7 @@ export default function Sidebar({ user }: SidebarProps) {
   const [fixed, setFixed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setMounted(true);
@@ -96,9 +99,13 @@ export default function Sidebar({ user }: SidebarProps) {
   }
   const hasMenu = (key: string) => isSpecial ? specialMenus.includes(key) : true;
 
-  // Mapa de chaves de menu para filtragem SPECIAL
-  // Keys: dashboard, tickets, workspace, kb, rmm, inventory, ai-chat, finance, reports, agenda, telemetry, security, admin
-  const allNavItems: (NavItem & { menuKey: string })[] = [
+  // ============================================================
+  // Mapa de itens de menu (data-driven, sem dependência de índice)
+  // - menuKey:  identificador único (usado para SPECIAL allowedMenus e regras de visibilidade)
+  // - parentKey: opcional. Se definido, item é exibido como submenu do grupo "parentKey"
+  // ============================================================
+  type NavDef = NavItem & { menuKey: string; parentKey?: string };
+  const allNavItems: NavDef[] = [
     { menuKey: 'dashboard', name: 'Dashboard', href: '/tickets/dashboard', icon: LayoutDashboard, section: 'principal' },
     { menuKey: 'tickets', name: 'Chamados', href: '/tickets/list', icon: Ticket, section: 'principal' },
     { menuKey: 'workspace', name: 'Workspace', href: '/tickets/workspace', icon: Columns3, section: 'principal' },
@@ -111,39 +118,69 @@ export default function Sidebar({ user }: SidebarProps) {
     { menuKey: 'agenda', name: 'Agenda', href: '/tickets/agenda', icon: CalendarDays, section: 'sistema' },
     { menuKey: 'telemetry', name: 'Telemetria', href: '/tickets/telemetry', icon: Activity, section: 'sistema' },
     { menuKey: 'security', name: 'Segurança', href: '/tickets/security', icon: Shield, section: 'sistema' },
-    { menuKey: 'admin', name: 'Administração', href: '/tickets/admin', icon: Settings, section: 'sistema' },
-    { menuKey: 'admin-email', name: 'Config. Email', href: '/tickets/admin/settings', icon: MessageCircle, section: 'sistema' },
-    { menuKey: 'admin-company', name: 'Config. Empresa', href: '/tickets/admin/company', icon: Building2, section: 'sistema' },
-    { menuKey: 'admin-statuses', name: 'Status de Chamados', href: '/tickets/admin/statuses', icon: Palette, section: 'sistema' },
     { menuKey: 'archive', name: 'Arquivo de Chamados', href: '/tickets/archive', icon: Archive, section: 'sistema' },
-    { menuKey: 'admin-whatsapp', name: 'WhatsApp', href: '/tickets/admin/whatsapp', icon: MessageCircle, section: 'sistema' },
-    { menuKey: 'monitoring', name: 'Monitoramento', href: '/tickets/monitoring', icon: HeartPulse, section: 'sistema' },
+    // Grupo "Administração" (parent)
+    { menuKey: 'admin', name: 'Administração', href: '/tickets/admin', icon: Settings, section: 'sistema' },
+    // Submenus de Administração (parentKey: 'admin')
+    { menuKey: 'admin-company', name: 'Config. Empresa', href: '/tickets/admin/company', icon: Building2, section: 'sistema', parentKey: 'admin' },
+    { menuKey: 'admin-email', name: 'Config. Email', href: '/tickets/admin/settings', icon: MessageCircle, section: 'sistema', parentKey: 'admin' },
+    { menuKey: 'admin-statuses', name: 'Status de Chamados', href: '/tickets/admin/statuses', icon: Palette, section: 'sistema', parentKey: 'admin' },
+    { menuKey: 'admin-whatsapp', name: 'WhatsApp', href: '/tickets/admin/whatsapp', icon: MessageCircle, section: 'sistema', parentKey: 'admin' },
+    { menuKey: 'monitoring', name: 'Monitoramento', href: '/tickets/monitoring', icon: HeartPulse, section: 'sistema', parentKey: 'admin' },
   ];
 
-  // Filtrar com base no role
-  const navigation: NavItem[] = isSpecial
-    ? allNavItems.filter(n => hasMenu(n.menuKey)).map(({ menuKey, ...rest }) => rest)
-    : [
-        allNavItems[0],  // Dashboard - sempre
-        allNavItems[1],  // Chamados - sempre
-        ...((isAdmin || isSupport) ? [allNavItems[2]] : []),  // Workspace
-        ...(!isClient ? [allNavItems[3]] : []),  // KB
-        ...((isAdmin || isSupport) ? [allNavItems[4]] : []),  // RMM
-        ...(isClient ? [allNavItems[5]] : []),  // Inventário
-        allNavItems[6],  // AI Chat - sempre
-        ...((isAdmin || isFinance) ? [allNavItems[7]] : []),  // Financeiro (oculto para SUPPORT)
-        ...(isStaff ? [allNavItems[8]] : []),  // Relatórios
-        ...((isAdmin || isSupport || isFinance) ? [allNavItems[9]] : []),  // Agenda
-        ...(isAdmin ? [allNavItems[10]] : []),  // Telemetria
-        allNavItems[11],  // Segurança - sempre
-        ...(isAdmin ? [allNavItems[12], allNavItems[13], allNavItems[14]] : []),
-        ...((isAdmin || isSupport) ? [allNavItems[15]] : []),  // Arquivo de Chamados (ADMIN + SUPPORT)
-        ...(isAdmin ? [allNavItems[16]] : []),
-        ...(isAdmin ? [allNavItems[17]] : []),  // Monitoramento (oculto para SUPPORT)
-      ].map(({ menuKey, ...rest }: any) => rest as NavItem);
+  // Regras de visibilidade por menuKey (substitui filtragem por índice — elimina bugs de off-by-one)
+  const canSeeMenu = (key: string): boolean => {
+    if (isSpecial) return hasMenu(key);
+    switch (key) {
+      case 'dashboard':
+      case 'tickets':
+      case 'ai-chat':
+      case 'security':
+        return true;
+      case 'workspace':
+      case 'rmm':
+        return isAdmin || isSupport;
+      case 'kb':
+        return !isClient;
+      case 'inventory':
+        return isClient;
+      case 'finance':
+        return isAdmin || isFinance;
+      case 'reports':
+        return isStaff;
+      case 'agenda':
+        return isAdmin || isSupport || isFinance;
+      case 'telemetry':
+      case 'admin':
+      case 'admin-email':
+      case 'admin-company':
+      case 'admin-statuses':
+      case 'admin-whatsapp':
+      case 'monitoring':
+        return isAdmin;
+      case 'archive':
+        return isAdmin || isSupport;
+      default:
+        return false;
+    }
+  };
 
-  const principal = navigation.filter((n) => n.section === 'principal');
-  const sistema = navigation.filter((n) => n.section === 'sistema');
+  // Itens visíveis após filtro de role
+  const visibleItems = allNavItems.filter(item => canSeeMenu(item.menuKey));
+
+  // Top-level items (sem parent) e mapa de filhos por parentKey
+  const topLevel = visibleItems.filter(i => !i.parentKey);
+  const childrenByParent: Record<string, NavDef[]> = {};
+  for (const item of visibleItems) {
+    if (item.parentKey) {
+      if (!childrenByParent[item.parentKey]) childrenByParent[item.parentKey] = [];
+      childrenByParent[item.parentKey].push(item);
+    }
+  }
+
+  const principal = topLevel.filter((n) => n.section === 'principal');
+  const sistema = topLevel.filter((n) => n.section === 'sistema');
 
   const isActive = (href: string) => {
     const p = pathname || '';
@@ -199,6 +236,120 @@ export default function Sidebar({ user }: SidebarProps) {
     );
   };
 
+  // Auto-expandir grupo se algum filho está ativo
+  useEffect(() => {
+    const next = new Set(expandedGroups);
+    let changed = false;
+    for (const parentKey of Object.keys(childrenByParent)) {
+      const children = childrenByParent[parentKey] || [];
+      const anyActive = children.some(c => isActive(c.href));
+      if (anyActive && !next.has(parentKey)) {
+        next.add(parentKey);
+        changed = true;
+      }
+    }
+    if (changed) setExpandedGroups(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const NavGroup = ({ item, items: kidItems, mob }: { item: NavDef; items: NavDef[]; mob?: boolean }) => {
+    const vis = show || mob;
+    const isOpen = expandedGroups.has(item.menuKey);
+    const anyChildActive = kidItems.some(c => isActive(c.href));
+    const parentActive = isActive(item.href) || anyChildActive;
+
+    if (!vis) {
+      // Modo colapsado: mostrar apenas ícone do parent (clique navega para parent.href)
+      return (
+        <Link
+          href={item.href}
+          className="group relative flex items-center justify-center rounded-lg"
+          style={{
+            padding: '8px 0',
+            background: parentActive ? 'rgba(59,130,246,0.18)' : 'transparent',
+            color: parentActive ? '#60a5fa' : 'rgba(255,255,255,0.6)',
+            transition: 'background 0.15s, color 0.15s',
+          }}
+          onMouseEnter={(e) => { if (!parentActive) e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
+          onMouseLeave={(e) => { if (!parentActive) e.currentTarget.style.background = 'transparent'; }}
+        >
+          <item.icon size={20} />
+          <span
+            className="pointer-events-none absolute opacity-0 group-hover:opacity-100"
+            style={{
+              left: 60, top: '50%', transform: 'translateY(-50%)',
+              background: '#1e293b', color: '#e2e8f0', padding: '4px 10px',
+              borderRadius: 6, fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
+              border: '1px solid rgba(255,255,255,0.1)', zIndex: 100,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)', transition: 'opacity 0.15s',
+            }}
+          >
+            {item.name}
+          </span>
+        </Link>
+      );
+    }
+
+    return (
+      <>
+        <button
+          onClick={() => toggleGroup(item.menuKey)}
+          className="group relative flex items-center gap-3 rounded-lg w-full"
+          style={{
+            padding: '8px 12px',
+            justifyContent: 'flex-start',
+            background: parentActive ? 'rgba(59,130,246,0.10)' : 'transparent',
+            color: parentActive ? '#60a5fa' : 'rgba(255,255,255,0.6)',
+            transition: 'background 0.15s, color 0.15s',
+            textAlign: 'left',
+          }}
+          onMouseEnter={(e) => { if (!parentActive) e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
+          onMouseLeave={(e) => { if (!parentActive) e.currentTarget.style.background = 'transparent'; }}
+        >
+          <item.icon size={20} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', fontSize: 13, fontWeight: 500 }}>
+            {item.name}
+          </span>
+          {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </button>
+        {isOpen && (
+          <div style={{ paddingLeft: 12, marginTop: 2 }}>
+            {kidItems.map((child) => {
+              const cAct = isActive(child.href);
+              return (
+                <Link
+                  key={child.menuKey}
+                  href={child.href}
+                  className="flex items-center gap-2 rounded-lg"
+                  style={{
+                    padding: '6px 12px',
+                    background: cAct ? 'rgba(59,130,246,0.18)' : 'transparent',
+                    color: cAct ? '#60a5fa' : 'rgba(255,255,255,0.55)',
+                    fontSize: 12.5,
+                    transition: 'background 0.15s, color 0.15s',
+                  }}
+                  onMouseEnter={(e) => { if (!cAct) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                  onMouseLeave={(e) => { if (!cAct) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <child.icon size={15} style={{ flexShrink: 0, opacity: 0.85 }} />
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', fontWeight: 500 }}>{child.name}</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </>
+    );
+  };
+
   const SectionLabel = ({ label, mob }: { label: string; mob?: boolean }) => (
     <div style={{
       opacity: (show || mob) ? 0.5 : 0, transition: 'opacity 0.18s ease',
@@ -251,10 +402,18 @@ export default function Sidebar({ user }: SidebarProps) {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden" style={{ padding: '8px' }}>
         <SectionLabel label="Principal" mob={mob} />
-        {principal.map((item) => <NavItem key={item.name} item={item} mob={mob} />)}
+        {principal.map((item) => {
+          const kids = childrenByParent[item.menuKey];
+          if (kids && kids.length > 0) return <NavGroup key={item.menuKey} item={item} items={kids} mob={mob} />;
+          return <NavItem key={item.menuKey} item={item} mob={mob} />;
+        })}
         <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '8px 0' }} />
         <SectionLabel label="Sistema" mob={mob} />
-        {sistema.map((item) => <NavItem key={item.name} item={item} mob={mob} />)}
+        {sistema.map((item) => {
+          const kids = childrenByParent[item.menuKey];
+          if (kids && kids.length > 0) return <NavGroup key={item.menuKey} item={item} items={kids} mob={mob} />;
+          return <NavItem key={item.menuKey} item={item} mob={mob} />;
+        })}
       </nav>
 
       {/* Footer */}

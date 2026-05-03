@@ -767,10 +767,15 @@ export default function FinancePage() {
                 {previewUrl && (
                   <button
                     onClick={() => {
+                      // Força download anexando ?disposition=attachment ao URL
+                      // (rota local respeita esse override; URLs S3 ignoram e seguem padrão)
+                      const sep = previewUrl.includes('?') ? '&' : '?';
+                      const dlUrl = previewUrl.startsWith('/api/')
+                        ? `${previewUrl}${sep}disposition=attachment`
+                        : previewUrl;
                       const a = document.createElement('a');
-                      a.href = previewUrl;
+                      a.href = dlUrl;
                       a.download = `nf_chamado_${previewTicket?.number || ''}.pdf`;
-                      a.target = '_blank';
                       a.rel = 'noopener noreferrer';
                       document.body.appendChild(a);
                       a.click();
