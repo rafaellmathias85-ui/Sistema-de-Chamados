@@ -239,7 +239,9 @@ export async function saveEmailAttachmentsToTicket(
       const contentType = att.contentType || 'application/octet-stream';
 
       // Imagens inline: salvar e mapear CID para URL
-      if (att.isInline && att.contentId) {
+      // NOTA: Alguns clientes de email (Gmail via M365) podem enviar imagens inline
+      // sem marcar isInline=true mas com contentId preenchido. Tratamos ambos os casos.
+      if (att.contentId && (att.isInline || contentType.startsWith('image/'))) {
         const inlineName = `tickets/${ticketId}/inline-${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${safeName}`;
         const { cloudStoragePath } = await storage.save(inlineName, buffer, contentType, true);
         const url = await storage.getUrl(cloudStoragePath, true);
@@ -823,7 +825,11 @@ export async function processEmailToTicket(
         );
 
         // Salvar anexos do email no S3 + TicketAttachment + resolver CID inline
-        if (email.hasAttachments) {
+        // NOTA: email.hasAttachments pode ser false mesmo com imagens inline (assinatura).
+        // Verificamos também se o HTML contém referências cid: para garantir resolução.
+        const replyHtmlRaw = email.body.contentType === 'html' ? (email.body.content || '') : '';
+        const replyHasCidRefs = /src\s*=\s*["']cid:/i.test(replyHtmlRaw);
+        if (email.hasAttachments || replyHasCidRefs) {
           try {
             const { saved, cidMap } = await saveEmailAttachmentsToTicket(
               accessToken,
@@ -845,6 +851,9 @@ export async function processEmailToTicket(
                   data: { contentHtml: replaceCidReferences(lastMsg.contentHtml, cidMap) },
                 });
               }
+            }
+            if (replyHasCidRefs && Object.keys(cidMap).length === 0) {
+              console.warn(`[Graph] HTML contém referências cid: mas nenhum anexo inline retornado para interação do ticket ${existingTicketId}`);
             }
           } catch (errAtt) {
             console.error('[Graph] Falha ao salvar anexos (interação):', errAtt);
@@ -893,9 +902,9 @@ export async function processEmailToTicket(
 
     // Preparar HTML sanitizado + cabeçalho (estilo N-able/Kaseya)
     let sanitizedHtml: string | null = null;
+    const rawHtml = email.body.contentType === 'html' ? (email.body.content || '') : '';
     try {
       const { sanitizeEmailHtmlAdvanced, generateEmailHeader } = await import('@/lib/email-sanitizer');
-      const rawHtml = email.body.contentType === 'html' ? (email.body.content || '') : '';
       if (rawHtml) {
         const to = (email.toRecipients || []).map((r) => r.emailAddress.address).join(', ');
         const cc = (email.ccRecipients || []).map((r) => r.emailAddress.address).join(', ');
@@ -929,7 +938,10 @@ export async function processEmailToTicket(
     });
 
     // Salvar anexos no S3 + TicketAttachment + resolver CID inline
-    if (email.hasAttachments) {
+    // NOTA: email.hasAttachments pode ser false mesmo com imagens inline (assinatura).
+    // Verificamos também se o HTML contém referências cid: para garantir resolução.
+    const newTicketHasCidRefs = rawHtml ? /src\s*=\s*["']cid:/i.test(rawHtml) : false;
+    if (email.hasAttachments || newTicketHasCidRefs) {
       try {
         const { saved, cidMap } = await saveEmailAttachmentsToTicket(
           accessToken,
@@ -945,6 +957,9 @@ export async function processEmailToTicket(
             where: { id: ticket.id },
             data: { descriptionHtml: updatedHtml },
           });
+        }
+        if (newTicketHasCidRefs && Object.keys(cidMap).length === 0) {
+          console.warn(`[Graph] HTML contém referências cid: mas nenhum anexo inline retornado para ticket #${ticket.id}`);
         }
       } catch (errAtt) {
         console.error('[Graph] Falha ao salvar anexos (novo ticket):', errAtt);

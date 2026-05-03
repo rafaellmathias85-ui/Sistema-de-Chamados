@@ -136,9 +136,10 @@ export default function Sidebar({ user }: SidebarProps) {
     switch (key) {
       case 'dashboard':
       case 'tickets':
-      case 'ai-chat':
       case 'security':
         return true;
+      case 'ai-chat':
+        return !isClient;
       case 'workspace':
       case 'rmm':
         return isAdmin || isSupport;
