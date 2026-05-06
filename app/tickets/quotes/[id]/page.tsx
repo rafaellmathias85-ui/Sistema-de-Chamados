@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
-import { ArrowLeft, Plus, Trash2, Save, Send, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Save, Send, CheckCircle2, XCircle, Loader2, Eye, Download } from 'lucide-react';
 
 interface QuoteItem {
   id: string;
@@ -53,6 +53,10 @@ export default function QuoteDetailPage() {
   const [saving, setSaving] = useState(false);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [newItem, setNewItem] = useState({ description: '', quantity: '1', unitPrice: '0' });
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const role = session?.user?.role;
   const isStaff = role === 'ADMIN' || role === 'SUPPORT' || role === 'FINANCE';
@@ -68,7 +72,7 @@ export default function QuoteDetailPage() {
   };
   const loadCompanies = async () => {
     try {
-      const r = await fetch('/api/companies');
+      const r = await fetch('/api/companies?limit=999');
       if (r.ok) {
         const data = await r.json();
         setCompanies(Array.isArray(data) ? data : (data.companies || []));
@@ -118,6 +122,42 @@ export default function QuoteDetailPage() {
     if (r.ok) router.push('/tickets/quotes');
   };
 
+  const handlePreview = async () => {
+    setLoadingPreview(true);
+    try {
+      const r = await fetch(`/api/quotes/${id}/pdf?format=html`);
+      if (r.ok) {
+        const html = await r.text();
+        setPreviewHtml(html);
+        setShowPreview(true);
+      } else {
+        alert('Erro ao gerar preview');
+      }
+    } finally { setLoadingPreview(false); }
+  };
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      const r = await fetch(`/api/quotes/${id}/pdf`);
+      if (r.ok) {
+        const blob = await r.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `orcamento-${quote?.number || id}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } else {
+        alert('Erro ao gerar PDF. Tente novamente.');
+      }
+    } catch {
+      alert('Erro ao baixar PDF');
+    } finally { setDownloadingPdf(false); }
+  };
+
   if (loading) return <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-blue-400" /></div>;
   if (!quote) return <div className="text-center tm-text-muted py-16">Orçamento não encontrado.</div>;
 
@@ -132,7 +172,13 @@ export default function QuoteDetailPage() {
           </div>
           <span className="px-3 py-1 rounded-full text-xs bg-white/10 tm-text">{STATUS_LABEL[quote.status]}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={handlePreview} disabled={loadingPreview} className="flex items-center gap-1 px-3 py-1.5 rounded bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 text-sm disabled:opacity-50">
+            {loadingPreview ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />} Preview
+          </button>
+          <button onClick={handleDownloadPdf} disabled={downloadingPdf} className="flex items-center gap-1 px-3 py-1.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-sm disabled:opacity-50">
+            {downloadingPdf ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {downloadingPdf ? 'Gerando...' : 'Baixar PDF'}
+          </button>
           {isStaff && quote.status === 'DRAFT' && (
             <button disabled={saving} onClick={() => patch({ status: 'SENT' })} className="flex items-center gap-1 px-3 py-1.5 rounded bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 text-sm"><Send size={14} /> Marcar como enviado</button>
           )}
@@ -235,6 +281,26 @@ export default function QuoteDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Preview Modal */}
+      {showPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowPreview(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-800">Preview do Orçamento #{quote.number}</h3>
+              <div className="flex items-center gap-2">
+                <button onClick={handleDownloadPdf} disabled={downloadingPdf} className="flex items-center gap-1 px-3 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50">
+                  {downloadingPdf ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {downloadingPdf ? 'Gerando...' : 'Baixar PDF'}
+                </button>
+                <button onClick={() => setShowPreview(false)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500">✕</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto">
+              <iframe srcDoc={previewHtml} className="w-full h-full min-h-[70vh]" title="Preview do orçamento" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
