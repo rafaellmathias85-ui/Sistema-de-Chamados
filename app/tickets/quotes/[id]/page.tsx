@@ -69,7 +69,10 @@ export default function QuoteDetailPage() {
   const loadCompanies = async () => {
     try {
       const r = await fetch('/api/companies');
-      if (r.ok) setCompanies(await r.json());
+      if (r.ok) {
+        const data = await r.json();
+        setCompanies(Array.isArray(data) ? data : (data.companies || []));
+      }
     } catch {}
   };
 
