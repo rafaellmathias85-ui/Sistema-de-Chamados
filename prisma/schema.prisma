@@ -51,6 +51,7 @@ model Tenant {
   whatsappIntegrations WhatsAppIntegration[]
   whatsappLogs WhatsAppLog[]
   snmpDevices  SnmpDevice[]
+  rmmInstallers RmmInstaller[]
 }
 
 enum Role {
@@ -276,12 +277,48 @@ model Company {
   tickets     Ticket[]
   rmmMachines RmmMachine[]
   snmpDevices SnmpDevice[]
+  rmmInstallers RmmInstaller[]
   
   @@index([tenantId])
   @@index([name])
 }
 
 // === RMM (Remote Monitoring and Management) ===
+
+// Pacote de instalacao MSI (ou outro arquivo) versionado, por empresa.
+// O MSI e gerado externamente em ambiente Windows (WiX + signtool) e
+// apenas distribuido por aqui via download autenticado por token.
+model RmmInstaller {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Metadados do pacote
+  fileName      String   // nome original (ex: WinnerRMM-acme-1.0.3.msi)
+  version       String   // SemVer ou string livre (ex: 1.0.3)
+  packageType   String   @default("msi") // msi | exe | zip | ps1
+  changelog     String?  // notas de release
+  // Storage S3
+  cloudStoragePath String // chave do objeto no bucket
+  fileSize         Int    // tamanho em bytes
+  sha256           String? // hash do arquivo para verificacao de integridade
+  // Distribuicao
+  downloadToken String   @unique // token para link publico de download
+  active        Boolean  @default(true) // false = arquivado
+  downloadCount Int      @default(0)
+  lastDownloadAt DateTime?
+  // Auditoria
+  uploadedById  String
+  uploadedByName String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  tenantId      String?
+  tenant        Tenant?  @relation(fields: [tenantId], references: [id])
+
+  @@index([companyId])
+  @@index([active])
+  @@index([tenantId])
+}
+
 
 enum RmmTaskStatus {
   PENDING

@@ -198,6 +198,14 @@ export default function RmmDashboardPage() {
               <Download size={16} /> Gerar Agente
             </Link>
           )}
+          {isAdmin && (
+            <Link
+              href="/tickets/rmm/installers"
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition flex items-center gap-2 text-sm font-medium"
+            >
+              <Download size={16} /> Pacotes MSI
+            </Link>
+          )}
         </div>
       </div>
 

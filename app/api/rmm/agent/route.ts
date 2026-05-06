@@ -699,8 +699,13 @@ while ($true) {
 // ============================================================
 function generateFullInstaller(apiUrl: string, companyToken: string, companyName: string): string {
   const agentContent = generateAgentPs1(apiUrl, companyToken);
-  // Encode agent to Base64 to embed safely inside the installer
-  const agentBase64 = Buffer.from(agentContent, 'utf-8').toString('base64');
+
+  // ATENCAO: o agente e embutido como here-string PowerShell @' ... '@ (literal, sem expansao
+  // de variaveis). NAO usar Base64+FromBase64String pois EDR/AV (Bitdefender, Defender ATP,
+  // SentinelOne, CrowdStrike) detectam esse padrao como assinatura de loader malicioso.
+  // O delimitador @'...'@ preserva o conteudo do agente exatamente como string literal.
+  // Caso o agente contenha a sequencia '@ no inicio de linha, ela e escapada para ` @.
+  const escapedAgent = agentContent.replace(/^'@/gm, '`@');
 
   return `# ============================================================
 # Instalador RMM - Winner Tecnologia
@@ -734,11 +739,14 @@ if (!(Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 }
 
-Write-Host "[2/4] Extraindo agente RMM..." -ForegroundColor Cyan
-$agentBase64 = "${agentBase64}"
-$agentBytes = [System.Convert]::FromBase64String($agentBase64)
-$agentContent = [System.Text.Encoding]::UTF8.GetString($agentBytes)
-Set-Content -Path $AgentFile -Value $agentContent -Encoding UTF8 -Force
+Write-Host "[2/4] Gravando agente RMM..." -ForegroundColor Cyan
+# Conteudo do agente embutido como here-string literal (sem ofuscacao Base64).
+# Isso evita falsos positivos de antivirus / EDR que tratam padroes
+# 'Base64 -> FromBase64String -> Invoke' como loader malicioso (heuristica AMSI).
+$agentContent = @'
+${escapedAgent}
+'@
+Set-Content -LiteralPath $AgentFile -Value $agentContent -Encoding UTF8 -Force
 
 Write-Host "[3/4] Registrando tarefa agendada do Windows..." -ForegroundColor Cyan
 
