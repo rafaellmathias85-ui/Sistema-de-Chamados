@@ -28,6 +28,7 @@ import {
   Sparkles,
   HeartPulse,
   Archive,
+  FileText,
   Palette,
   ChevronDown,
   ChevronRight,
@@ -114,6 +115,7 @@ export default function Sidebar({ user }: SidebarProps) {
     { menuKey: 'inventory', name: 'Inventário', href: '/tickets/inventory', icon: HardDrive, section: 'principal' },
     { menuKey: 'ai-chat', name: 'Assistente IA', href: '/tickets/ai-chat', icon: Sparkles, section: 'principal' },
     { menuKey: 'finance', name: 'Financeiro', href: '/tickets/finance', icon: DollarSign, section: 'sistema' },
+    { menuKey: 'quotes', name: 'Orçamentos', href: '/tickets/quotes', icon: FileText, section: 'sistema' },
     { menuKey: 'reports', name: 'Relatórios', href: '/tickets/reports', icon: BarChart3, section: 'sistema' },
     { menuKey: 'agenda', name: 'Agenda', href: '/tickets/agenda', icon: CalendarDays, section: 'sistema' },
     { menuKey: 'telemetry', name: 'Telemetria', href: '/tickets/telemetry', icon: Activity, section: 'sistema' },
@@ -149,6 +151,8 @@ export default function Sidebar({ user }: SidebarProps) {
         return isClient;
       case 'finance':
         return isAdmin || isFinance;
+      case 'quotes':
+        return isAdmin || isSupport || isFinance;
       case 'reports':
         return isStaff;
       case 'agenda':

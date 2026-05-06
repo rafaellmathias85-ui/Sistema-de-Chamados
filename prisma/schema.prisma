@@ -278,6 +278,7 @@ model Company {
   rmmMachines RmmMachine[]
   snmpDevices SnmpDevice[]
   rmmInstallers RmmInstaller[]
+  quotes      Quote[]
   
   @@index([tenantId])
   @@index([name])
@@ -322,6 +323,7 @@ model RmmInstaller {
 
 enum RmmTaskStatus {
   PENDING
+  RUNNING
   EXECUTED
   ERROR
   CANCELLED
@@ -522,7 +524,9 @@ model RmmTask {
   command   String        // Comando PowerShell/CMD
   scriptType String?      // Tipo de script: powershell, cmd, vbscript, python, auto
   status    RmmTaskStatus @default(PENDING)
-  result    String?       // Saída do comando
+  result    String?       @db.Text // Saída do comando (final)
+  liveOutput String?      @db.Text // Saída em tempo real (incremental, durante execução)
+  startedAt  DateTime?    // Quando o agente iniciou a execução
   
   machineId String
   machine   RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
@@ -570,6 +574,12 @@ model Ticket {
   reopenedFlag    Boolean    @default(false)
   reopenedAt      DateTime?
   reopenCount     Int        @default(0)
+
+  // Mesclagem de chamados (chamado origem aponta para o destino)
+  mergedIntoId    String?
+  mergedInto      Ticket?    @relation("TicketMerge", fields: [mergedIntoId], references: [id])
+  mergedFrom      Ticket[]   @relation("TicketMerge")
+  mergedAt        DateTime?
   
   // Alerta para o responsável quando há nova interação
   alertAssignee     Boolean    @default(false)
@@ -599,6 +609,7 @@ model Ticket {
   history         TicketHistory[]
   appointments    Appointment[]
   transferRequests TicketTransferRequest[]
+  quotes          Quote[]
   
   @@index([tenantId])
 }
@@ -1141,4 +1152,51 @@ model LegacyImportBatch {
 
   @@index([createdAt])
   @@index([sourceSystem])
+}
+// ===== ORCAMENTOS =====
+model Quote {
+  id              String       @id @default(cuid())
+  number          Int          @unique @default(autoincrement())
+  title           String
+  description     String?      @db.Text
+  status          String       @default("DRAFT") // DRAFT, SENT, APPROVED, REJECTED, EXPIRED, CANCELLED
+  subtotal        Float        @default(0)
+  discount        Float        @default(0)   // valor absoluto de desconto
+  total           Float        @default(0)
+  validUntil      DateTime?
+  notes           String?      @db.Text
+  rejectionReason String?      @db.Text
+
+  companyId       String?
+  company         Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  ticketId        String?
+  ticket          Ticket?      @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  createdBy       String
+  createdByName   String
+  sentAt          DateTime?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  items           QuoteItem[]
+
+  @@index([status])
+  @@index([companyId])
+  @@index([ticketId])
+  @@index([createdAt])
+}
+
+model QuoteItem {
+  id          String   @id @default(cuid())
+  quoteId     String
+  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Float    @default(1)
+  unitPrice   Float    @default(0)
+  total       Float    @default(0)
+  order       Int      @default(0)
+
+  @@index([quoteId])
 }

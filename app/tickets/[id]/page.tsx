@@ -85,6 +85,13 @@ interface TicketDetail {
   messages: TicketMessage[];
   attachments: TicketAttachment[];
   alertAssignee?: boolean;
+  reopenedFlag?: boolean;
+  reopenedAt?: string | null;
+  reopenCount?: number;
+  mergedIntoId?: string | null;
+  mergedAt?: string | null;
+  mergedInto?: { id: string; number: number; subject: string } | null;
+  mergedFrom?: Array<{ id: string; number: number; subject: string }>;
 }
 
 export default function TicketDetailPage() {
@@ -114,6 +121,14 @@ export default function TicketDetailPage() {
   const [selectedPartner, setSelectedPartner] = useState('');
   const [partnerNote, setPartnerNote] = useState('');
   const [loadingPartners, setLoadingPartners] = useState(false);
+  // Merge modal state
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeQuery, setMergeQuery] = useState('');
+  const [mergeResults, setMergeResults] = useState<Array<{ id: string; number: number; subject: string; status: string }>>([]);
+  const [mergeSelected, setMergeSelected] = useState<{ id: string; number: number; subject: string } | null>(null);
+  const [mergeReason, setMergeReason] = useState('');
+  const [mergeLoading, setMergeLoading] = useState(false);
+  const [mergeSearching, setMergeSearching] = useState(false);
 
   const isStaff = session?.user?.role === 'ADMIN' || session?.user?.role === 'SUPPORT' || session?.user?.role === 'FINANCE';
   const isAdmin = session?.user?.role === 'ADMIN';
@@ -345,6 +360,47 @@ export default function TicketDetailPage() {
     fetchTicket();
   };
 
+  // ===== MERGE =====
+  const searchMergeTargets = async (q: string) => {
+    setMergeSearching(true);
+    try {
+      const res = await fetch(`/api/tickets/${params.id}/merge/search?q=${encodeURIComponent(q)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMergeResults(data.tickets || []);
+      } else {
+        setMergeResults([]);
+      }
+    } catch (e) {
+      setMergeResults([]);
+    } finally {
+      setMergeSearching(false);
+    }
+  };
+
+  const handleConfirmMerge = async () => {
+    if (!mergeSelected) return;
+    setMergeLoading(true);
+    try {
+      const res = await fetch(`/api/tickets/${params.id}/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetTicketId: mergeSelected.id, reason: mergeReason || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data?.error || 'Erro ao mesclar chamado');
+        return;
+      }
+      // Sucesso: redireciona para o destino
+      router.push(`/tickets/${mergeSelected.id}`);
+    } catch (e) {
+      alert('Erro de rede ao mesclar chamado');
+    } finally {
+      setMergeLoading(false);
+    }
+  };
+
   const handleAssignToMe = async () => {
     setUpdating(true);
     try {
@@ -480,6 +536,65 @@ export default function TicketDetailPage() {
               Nova interação neste chamado — verifique as atualizações abaixo.
             </span>
           </motion.div>
+        )}
+        {ticket.reopenedFlag && ticket.reopenedAt && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center gap-3 px-4 py-3 mb-4 bg-yellow-500/15 border border-yellow-400/40 rounded-xl"
+          >
+            <Bell className="h-5 w-5 text-yellow-400 shrink-0" />
+            <div className="flex-1">
+              <div className="text-yellow-300 text-sm font-semibold">
+                Chamado reaberto pelo cliente em{' '}
+                {new Date(ticket.reopenedAt).toLocaleString('pt-BR', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+                {ticket.reopenCount && ticket.reopenCount > 1
+                  ? ` (${ticket.reopenCount}ª reabertura)`
+                  : ''}
+              </div>
+              <div className="text-yellow-300/80 text-xs mt-0.5">
+                O cliente respondeu apos o chamado ter sido finalizado. Status retornou para Aberto.
+              </div>
+            </div>
+          </motion.div>
+        )}
+        {ticket.mergedInto && (
+          <div className="flex items-center gap-3 px-4 py-3 mb-4 bg-purple-500/15 border border-purple-400/40 rounded-xl">
+            <span className="text-purple-300 text-sm">
+              🔗 Este chamado foi mesclado em{' '}
+              <button
+                onClick={() => router.push(`/tickets/${ticket.mergedInto?.id}`)}
+                className="font-semibold underline hover:text-purple-200"
+              >
+                #{ticket.mergedInto.number} — {ticket.mergedInto.subject}
+              </button>
+            </span>
+          </div>
+        )}
+        {ticket.mergedFrom && ticket.mergedFrom.length > 0 && (
+          <div className="px-4 py-3 mb-4 bg-purple-500/10 border border-purple-400/30 rounded-xl">
+            <div className="text-purple-300 text-sm font-semibold mb-1">
+              🔗 Chamados mesclados aqui ({ticket.mergedFrom.length})
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {ticket.mergedFrom.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => router.push(`/tickets/${m.id}`)}
+                  className="text-xs px-2 py-1 rounded bg-purple-500/20 text-purple-200 hover:bg-purple-500/30"
+                  title={m.subject}
+                >
+                  #{m.number}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
@@ -726,6 +841,22 @@ export default function TicketDetailPage() {
                     title="Transferir responsabilidade"
                   >
                     <ArrowLeftRight size={12} className="inline mr-1" />Transferir
+                  </button>
+                )}
+                {isStaff && !ticket.mergedIntoId && ticket.status !== 'CLOSED' && (
+                  <button
+                    onClick={() => {
+                      setShowMergeModal(true);
+                      setMergeQuery('');
+                      setMergeResults([]);
+                      setMergeSelected(null);
+                      setMergeReason('');
+                      searchMergeTargets('');
+                    }}
+                    className="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 transition-colors"
+                    title="Mesclar este chamado em outro"
+                  >
+                    🔗 Mesclar
                   </button>
                 )}
               </div>
@@ -1074,6 +1205,83 @@ export default function TicketDetailPage() {
                 onClick={() => setShowPartnerModal(false)}
                 className="px-4 py-2.5 tm-bg-card border tm-border tm-text rounded-lg text-sm transition-colors hover:opacity-80"
               >Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Merge Modal */}
+      {showMergeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="tm-bg-card border tm-border rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b tm-border">
+              <h3 className="text-lg font-semibold tm-text">🔗 Mesclar este chamado em outro</h3>
+              <button onClick={() => setShowMergeModal(false)} className="tm-text-muted hover:tm-text">✕</button>
+            </div>
+            <div className="p-5 overflow-y-auto flex-1 space-y-4">
+              <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-400/30 rounded-lg text-xs text-yellow-300">
+                ⚠️ Este chamado <strong>#{ticket.number}</strong> será fechado e suas mensagens/anexos movidos para o chamado destino. A operação não é reversível.
+              </div>
+              <div>
+                <label className="block text-xs tm-text-muted mb-1">Buscar chamado destino (mesma empresa)</label>
+                <input
+                  type="text"
+                  value={mergeQuery}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMergeQuery(v);
+                    setMergeSelected(null);
+                    searchMergeTargets(v);
+                  }}
+                  placeholder="Digite número ou parte do assunto"
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 tm-text text-sm focus:border-purple-500 outline-none"
+                />
+              </div>
+              <div className="space-y-1 max-h-72 overflow-y-auto">
+                {mergeSearching && <div className="text-xs tm-text-muted">Buscando...</div>}
+                {!mergeSearching && mergeResults.length === 0 && (
+                  <div className="text-xs tm-text-muted">Nenhum chamado disponível.</div>
+                )}
+                {mergeResults.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setMergeSelected({ id: t.id, number: t.number, subject: t.subject })}
+                    className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
+                      mergeSelected?.id === t.id
+                        ? 'bg-purple-500/20 border-purple-400 tm-text'
+                        : 'bg-white/5 border-white/10 tm-text hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="text-accent-blue font-semibold">#{t.number}</span>
+                    <span className="ml-2">{t.subject}</span>
+                    <span className="ml-2 text-xs tm-text-muted">[{t.status}]</span>
+                  </button>
+                ))}
+              </div>
+              <div>
+                <label className="block text-xs tm-text-muted mb-1">Motivo da mesclagem (opcional)</label>
+                <textarea
+                  value={mergeReason}
+                  onChange={(e) => setMergeReason(e.target.value)}
+                  rows={2}
+                  placeholder="Ex.: chamado duplicado pelo mesmo problema"
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 tm-text text-sm focus:border-purple-500 outline-none resize-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-4 border-t tm-border">
+              <button
+                onClick={() => setShowMergeModal(false)}
+                className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 tm-text text-sm hover:bg-white/10"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmMerge}
+                disabled={!mergeSelected || mergeLoading}
+                className="px-4 py-2 rounded-lg bg-purple-500 text-white text-sm font-medium hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {mergeLoading ? 'Mesclando...' : `Mesclar em ${mergeSelected ? `#${mergeSelected.number}` : '...'}`}
+              </button>
             </div>
           </div>
         </div>

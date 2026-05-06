@@ -67,17 +67,18 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Create a task for the agent to pick up
-    await prisma.rmmTask.create({
+    // Create a task for the agent to pick up - sends actual content for streaming
+    const task = await prisma.rmmTask.create({
       data: {
         machineId,
-        command: `EXEC_SCRIPT:${script.scriptType}:${script.id}:${execLog.id}`,
+        command: script.content,
+        scriptType: script.scriptType,
         createdBy: session.user.id,
         createdByName: session.user.name,
       },
     });
 
-    return NextResponse.json(execLog, { status: 201 });
+    return NextResponse.json({ ...execLog, taskId: task.id }, { status: 201 });
   } catch (error) {
     console.error('Erro ao solicitar execução:', error);
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 });

@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import {
   Network, Wifi, WifiOff, Plus, Trash2, RefreshCw,
   ChevronLeft, Router, Server, Shield, Loader2, Radio,
-  Building2, Monitor, Pencil,
+  Building2, Monitor, Pencil, Stethoscope, X, AlertTriangle, CheckCircle2,
 } from 'lucide-react';
 
 interface SnmpDevice {
@@ -50,6 +50,10 @@ export default function NetworkPage() {
   const [showModal, setShowModal] = useState(false);
   const [editDevice, setEditDevice] = useState<SnmpDevice | null>(null);
   const [polling, setPolling] = useState<string | null>(null);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagDeviceName, setDiagDeviceName] = useState<string>('');
+  const [diagResult, setDiagResult] = useState<any>(null);
   const [form, setForm] = useState({
     name: '', ipAddress: '', community: 'public', type: 'router',
     companyId: '', watcherMachineId: '',
@@ -166,6 +170,26 @@ export default function NetworkPage() {
 
   const fmt = (d: string | null) => d ? new Date(d).toLocaleString('pt-BR') : 'Nunca';
 
+  const handleTest = async (d: SnmpDevice) => {
+    setDiagOpen(true);
+    setDiagLoading(true);
+    setDiagDeviceName(`${d.name} (${d.ipAddress})`);
+    setDiagResult(null);
+    try {
+      const res = await fetch('/api/rmm/snmp/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: d.id }),
+      });
+      const data = await res.json();
+      setDiagResult(data);
+    } catch (err: any) {
+      setDiagResult({ error: 'Falha ao executar diagnostico', detail: err?.message || String(err) });
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-blue-400" size={32} /></div>;
 
   const onlineCount = devices.filter(d => d.status === 'online').length;
@@ -267,6 +291,11 @@ export default function NetworkPage() {
                     className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 tm-bg-card hover:bg-white/10 border tm-border tm-text text-xs rounded-lg">
                     {polling === d.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Verificar
                   </button>
+                  <button onClick={() => handleTest(d)} disabled={diagLoading}
+                    title="Diagnostico detalhado SNMP/portas"
+                    className="flex items-center justify-center gap-1 px-2 py-1.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 text-xs rounded-lg">
+                    <Stethoscope size={12} /> Testar
+                  </button>
                   {session?.user?.role === 'ADMIN' && (
                     <>
                       <button onClick={() => openEdit(d)}
@@ -362,6 +391,128 @@ export default function NetworkPage() {
               <button onClick={handleSave}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">
                 {editDevice ? 'Salvar' : 'Adicionar'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal Diagnostico SNMP */}
+      {diagOpen && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+            className="tm-bg-card border tm-border rounded-2xl p-6 w-full max-w-3xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold tm-text flex items-center gap-2">
+                  <Stethoscope size={18} className="text-purple-400" />
+                  Diagnostico SNMP
+                </h3>
+                <p className="text-xs tm-text-muted mt-1">{diagDeviceName}</p>
+              </div>
+              <button onClick={() => setDiagOpen(false)}
+                className="tm-text-muted hover:tm-text">
+                <X size={20} />
+              </button>
+            </div>
+
+            {diagLoading && (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="animate-spin text-purple-400" size={32} />
+                <span className="ml-3 tm-text-muted">Executando probes TCP...</span>
+              </div>
+            )}
+
+            {!diagLoading && diagResult && (
+              <div className="space-y-4">
+                {diagResult.error && (
+                  <div className="p-3 bg-red-500/15 border border-red-500/30 rounded-lg text-red-300 text-sm">
+                    <strong>Erro:</strong> {diagResult.error}
+                    {diagResult.detail && <div className="text-xs mt-1 opacity-80">{diagResult.detail}</div>}
+                  </div>
+                )}
+
+                {!diagResult.error && (
+                  <>
+                    {/* Resumo */}
+                    <div className={`p-3 rounded-lg border flex items-start gap-3 ${
+                      diagResult.ok
+                        ? 'bg-green-500/15 border-green-500/30'
+                        : 'bg-red-500/15 border-red-500/30'
+                    }`}>
+                      {diagResult.ok
+                        ? <CheckCircle2 size={20} className="text-green-400 shrink-0 mt-0.5" />
+                        : <AlertTriangle size={20} className="text-red-400 shrink-0 mt-0.5" />}
+                      <div className="flex-1 text-sm">
+                        <div className={`font-semibold ${diagResult.ok ? 'text-green-300' : 'text-red-300'}`}>
+                          {diagResult.ok ? 'Dispositivo respondeu' : 'Dispositivo nao respondeu'}
+                        </div>
+                        <div className="tm-text-muted text-xs mt-0.5">
+                          {diagResult.onlineCount}/{diagResult.totalPorts} portas abertas
+                          {diagResult.minLatencyMs != null && ` • latencia min: ${diagResult.minLatencyMs}ms`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Tabela de portas */}
+                    {diagResult.portResults && (
+                      <div className="border tm-border rounded-lg overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead className="bg-white/5">
+                            <tr>
+                              <th className="px-3 py-2 text-left tm-text-muted">Porta</th>
+                              <th className="px-3 py-2 text-left tm-text-muted">Servico</th>
+                              <th className="px-3 py-2 text-left tm-text-muted">Status</th>
+                              <th className="px-3 py-2 text-left tm-text-muted">Detalhe</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {diagResult.portResults.map((p: any) => (
+                              <tr key={p.port} className="border-t tm-border">
+                                <td className="px-3 py-2 font-mono tm-text">{p.port}</td>
+                                <td className="px-3 py-2 tm-text-muted">{p.label}</td>
+                                <td className="px-3 py-2">
+                                  {p.ok
+                                    ? <span className="text-green-400">● Aberta</span>
+                                    : <span className="text-red-400">● Fechada</span>}
+                                </td>
+                                <td className="px-3 py-2 tm-text-muted">
+                                  {p.ok ? `${p.ms}ms` : (p.error || '-')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Log completo */}
+                    {diagResult.log && (
+                      <div>
+                        <div className="text-xs tm-text-muted mb-2">Log completo:</div>
+                        <div className="bg-black/40 border tm-border rounded-lg p-3 max-h-72 overflow-y-auto font-mono text-xs space-y-1">
+                          {diagResult.log.map((l: any, i: number) => (
+                            <div key={i} className={
+                              l.level === 'ok' ? 'text-green-300'
+                              : l.level === 'warn' ? 'text-yellow-300'
+                              : l.level === 'error' ? 'text-red-300'
+                              : 'tm-text-muted'
+                            }>
+                              <span className="opacity-60">[{l.ts}]</span> {l.msg}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end mt-6">
+              <button onClick={() => setDiagOpen(false)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">
+                Fechar
               </button>
             </div>
           </motion.div>

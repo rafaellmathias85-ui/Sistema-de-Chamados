@@ -480,7 +480,15 @@ function Detect-ScriptType($content) {
     return 'powershell'
 }
 
-function Execute-ScriptContent($content, $scriptType) {
+function Send-Chunk($taskId, $chunk, $started) {
+    try {
+        $headers = @{ Authorization = "Bearer $COMPANY_TOKEN" }
+        $body = @{ chunk = $chunk; started = $started } | ConvertTo-Json -Depth 3
+        Invoke-RestMethod -Uri "$API_URL/report/$taskId/append" -Method POST -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -ContentType "application/json; charset=utf-8" -TimeoutSec 10 -ErrorAction SilentlyContinue | Out-Null
+    } catch { }
+}
+
+function Execute-ScriptContent($content, $scriptType, $taskId) {
     # Remove the type prefix if present
     $cleanContent = $content -replace '^@@SCRIPTTYPE:\\w+@@', ''
     
@@ -509,12 +517,12 @@ function Execute-ScriptContent($content, $scriptType) {
                 $header += "set \`"PATH=$wingetDir;%PATH%\`"" + $nl
             }
             Set-Content -Path $tempFile -Value ($header + $cleanContent) -Encoding ASCII
-            $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c \`"$tempFile\`"" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+            $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c \`"$tempFile\`"" -NoNewWindow -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
         }
         'vbscript' {
             $tempFile = Join-Path $tempDir "task_\$timestamp.vbs"
             Set-Content -Path $tempFile -Value $cleanContent -Encoding ASCII
-            $proc = Start-Process -FilePath "cscript.exe" -ArgumentList "//NoLogo \`"$tempFile\`"" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+            $proc = Start-Process -FilePath "cscript.exe" -ArgumentList "//NoLogo \`"$tempFile\`"" -NoNewWindow -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
         }
         'python' {
             $tempFile = Join-Path $tempDir "task_\$timestamp.py"
@@ -522,7 +530,7 @@ function Execute-ScriptContent($content, $scriptType) {
             $header = "import os" + $nl + "DesktopPath = r'$DesktopPath'" + $nl + "os.environ['DESKTOP_PATH'] = DesktopPath" + $nl
             Set-Content -Path $tempFile -Value ($header + $cleanContent) -Encoding UTF8
             $pythonExe = if (Get-Command python -ErrorAction SilentlyContinue) { "python" } elseif (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
-            $proc = Start-Process -FilePath $pythonExe -ArgumentList "\`"$tempFile\`"" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+            $proc = Start-Process -FilePath $pythonExe -ArgumentList "\`"$tempFile\`"" -NoNewWindow -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
         }
         default {
             # PowerShell
@@ -540,10 +548,50 @@ function Execute-ScriptContent($content, $scriptType) {
                 $header += "\`$WingetExe = \`$null" + $nl
             }
             Set-Content -Path $tempFile -Value ($header + $cleanContent) -Encoding UTF8
-            $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -File \`"$tempFile\`"" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+            $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -File \`"$tempFile\`"" -NoNewWindow -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
         }
     }
     
+    # Streaming: monitora o processo e envia chunks ao servidor (best-effort)
+    if ($taskId -and $proc) {
+        Send-Chunk $taskId "" $true
+        $stdoutPos = 0
+        $stderrPos = 0
+        while (-not $proc.HasExited) {
+            Start-Sleep -Seconds 2
+            try {
+                if (Test-Path $stdoutFile) {
+                    $fs = [IO.File]::Open($stdoutFile, 'Open', 'Read', 'ReadWrite')
+                    try {
+                        if ($fs.Length -gt $stdoutPos) {
+                            $fs.Seek($stdoutPos, 'Begin') | Out-Null
+                            $buf = New-Object byte[] ($fs.Length - $stdoutPos)
+                            $fs.Read($buf, 0, $buf.Length) | Out-Null
+                            $chunkText = [System.Text.Encoding]::UTF8.GetString($buf)
+                            if ($chunkText) { Send-Chunk $taskId $chunkText $false }
+                            $stdoutPos = $fs.Length
+                        }
+                    } finally { $fs.Close() }
+                }
+                if (Test-Path $stderrFile) {
+                    $fs2 = [IO.File]::Open($stderrFile, 'Open', 'Read', 'ReadWrite')
+                    try {
+                        if ($fs2.Length -gt $stderrPos) {
+                            $fs2.Seek($stderrPos, 'Begin') | Out-Null
+                            $buf2 = New-Object byte[] ($fs2.Length - $stderrPos)
+                            $fs2.Read($buf2, 0, $buf2.Length) | Out-Null
+                            $chunkText2 = [System.Text.Encoding]::UTF8.GetString($buf2)
+                            if ($chunkText2) { Send-Chunk $taskId "[STDERR] $chunkText2" $false }
+                            $stderrPos = $fs2.Length
+                        }
+                    } finally { $fs2.Close() }
+                }
+            } catch { }
+        }
+    } elseif ($proc) {
+        $proc.WaitForExit()
+    }
+
     $stdout = if (Test-Path $stdoutFile) { Get-Content $stdoutFile -Raw } else { "" }
     $stderr = if (Test-Path $stderrFile) { Get-Content $stderrFile -Raw } else { "" }
     $exitCode = if ($proc) { $proc.ExitCode } else { -1 }
@@ -578,7 +626,7 @@ function Check-Tasks($machineId) {
             Write-Log "Executando tarefa $taskId (tipo: $scriptType)"
 
             try {
-                $output = Execute-ScriptContent $rawCommand $scriptType
+                $output = Execute-ScriptContent $rawCommand $scriptType $taskId
                 $reportBody = @{ output = $output } | ConvertTo-Json -Depth 3
                 Invoke-RestMethod -Uri "$API_URL/report/$taskId" -Method POST -Body ([System.Text.Encoding]::UTF8.GetBytes($reportBody)) -ContentType "application/json; charset=utf-8" -TimeoutSec 30
                 Write-Log "Tarefa $taskId concluida"

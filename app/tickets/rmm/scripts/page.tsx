@@ -60,6 +60,9 @@ export default function ScriptsPage() {
   const [approving, setApproving] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
   const [execResult, setExecResult] = useState<string | null>(null);
+  const [execTaskId, setExecTaskId] = useState<string | null>(null);
+  const [execLiveOutput, setExecLiveOutput] = useState<string>('');
+  const [execStatus, setExecStatus] = useState<string>('');
 
   const [form, setForm] = useState({ name: '', description: '', scriptType: 'bat', content: '', companyId: '' });
 
@@ -125,6 +128,9 @@ export default function ScriptsPage() {
     if (!execModal || !selectedMachine) return;
     setExecuting(true);
     setExecResult(null);
+    setExecLiveOutput('');
+    setExecStatus('');
+    setExecTaskId(null);
     try {
       const res = await fetch('/api/rmm/exec', {
         method: 'POST',
@@ -133,14 +139,38 @@ export default function ScriptsPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setExecResult('Execução solicitada com sucesso! Status: PENDING');
-        setTimeout(() => { setExecModal(null); setExecResult(null); setSelectedMachine(''); }, 3000);
+        setExecResult('Execução solicitada. Aguardando agente...');
+        setExecTaskId(data.taskId || null);
+        setExecStatus('PENDING');
       } else {
         setExecResult(data.error || 'Erro');
       }
     } catch { setExecResult('Erro de conexão'); }
     finally { setExecuting(false); }
   };
+
+  // Polling de live output da tarefa
+  useEffect(() => {
+    if (!execTaskId) return;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const r = await fetch(`/api/rmm/tasks/by-id/${execTaskId}`);
+        if (r.ok) {
+          const t = await r.json();
+          setExecStatus(t.status);
+          setExecLiveOutput(t.liveOutput || t.result || '');
+          if (t.status === 'EXECUTED' || t.status === 'ERROR' || t.status === 'CANCELLED') {
+            return; // termina polling
+          }
+        }
+      } catch {}
+      setTimeout(tick, 2000);
+    };
+    tick();
+    return () => { stopped = true; };
+  }, [execTaskId]);
 
   const filtered = scripts.filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -281,7 +311,7 @@ export default function ScriptsPage() {
       {/* Execute modal */}
       {execModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-gray-900 rounded-xl p-6 w-full max-w-md border border-gray-700">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-gray-900 rounded-xl p-6 w-full max-w-3xl border border-gray-700 max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-bold tm-text mb-4">Executar Script</h2>
             <p className="text-sm tm-text-secondary mb-3">Selecione a máquina para executar o script:</p>
             <select value={selectedMachine} onChange={e => setSelectedMachine(e.target.value)} className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg tm-text focus:outline-none focus:border-blue-500 mb-4">
@@ -291,12 +321,25 @@ export default function ScriptsPage() {
               ))}
             </select>
             {execResult && (
-              <div className={`mb-4 p-3 rounded-lg text-sm ${execResult.includes('sucesso') ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                {execResult}
+              <div className={`mb-4 p-3 rounded-lg text-sm ${execStatus === 'EXECUTED' ? 'bg-green-500/20 text-green-400' : execStatus === 'ERROR' ? 'bg-red-500/20 text-red-400' : 'bg-blue-500/20 text-blue-300'}`}>
+                {execResult} {execStatus && <span className="ml-2 font-semibold">[{execStatus}]</span>}
+              </div>
+            )}
+            {(execLiveOutput || execTaskId) && (
+              <div className="mb-4">
+                <div className="text-xs tm-text-muted mb-1 flex items-center gap-2">
+                  <span>Saída do script (atualização em tempo real)</span>
+                  {execStatus && execStatus !== 'EXECUTED' && execStatus !== 'ERROR' && (
+                    <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
+                  )}
+                </div>
+                <pre className="bg-black/60 border border-gray-800 rounded-lg p-3 text-xs text-green-300 font-mono whitespace-pre-wrap break-words max-h-80 overflow-y-auto">
+{execLiveOutput || '(aguardando saída...)'}
+                </pre>
               </div>
             )}
             <div className="flex justify-end gap-3">
-              <button onClick={() => { setExecModal(null); setExecResult(null); }} className="px-4 py-2 tm-text-secondary hover:tm-text">Cancelar</button>
+              <button onClick={() => { setExecModal(null); setExecResult(null); setExecTaskId(null); setExecLiveOutput(''); setExecStatus(''); setSelectedMachine(''); }} className="px-4 py-2 tm-text-secondary hover:tm-text">Fechar</button>
               <button onClick={handleExecute} disabled={executing || !selectedMachine} className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50">
                 {executing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
                 Executar

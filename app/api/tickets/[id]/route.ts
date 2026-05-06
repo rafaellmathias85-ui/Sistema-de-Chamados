@@ -24,6 +24,8 @@ export async function GET(
         assignee: { select: { id: true, name: true } },
         company: { select: { name: true } },
         category: { select: { id: true, name: true, color: true } },
+        mergedInto: { select: { id: true, number: true, subject: true } },
+        mergedFrom: { select: { id: true, number: true, subject: true } },
         messages: {
           orderBy: { createdAt: 'asc' },
         },

@@ -72,6 +72,60 @@ export async function POST(
       });
     }
 
+    // ========================================================
+    // REABERTURA AUTOMATICA: cliente respondeu chamado fechado
+    // ========================================================
+    // Se o autor eh cliente (CLIENT) E ticket esta RESOLVED/CLOSED,
+    // reabrir o chamado (status -> OPEN), incrementar reopenCount,
+    // marcar reopenedAt e adicionar registro no historico para
+    // exibir banner amarelo na UI.
+    let reopened = false;
+    if (
+      !finalIsInternal &&
+      session.user.role === 'CLIENT' &&
+      (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')
+    ) {
+      await prisma.ticket.update({
+        where: { id: params.id },
+        data: {
+          status: 'OPEN',
+          reopenedFlag: true,
+          reopenedAt: new Date(),
+          reopenCount: { increment: 1 },
+          alertAssignee: true, // alerta o responsavel
+        },
+      });
+      try {
+        await prisma.ticketHistory.create({
+          data: {
+            ticketId: params.id,
+            userId: session.user.id,
+            userName: session.user.name || 'Cliente',
+            userRole: session.user.role as any,
+            action: 'REOPENED',
+            fromValue: ticket.status,
+            toValue: 'OPEN',
+            note: `Chamado reaberto automaticamente apos resposta do cliente`,
+          },
+        });
+      } catch (e) {
+        console.error('Erro ao registrar historico de reabertura:', e);
+      }
+      reopened = true;
+      emitEvent({
+        type: 'ticket_reopened',
+        entityType: 'ticket',
+        entityId: params.id,
+        severity: 'warning',
+        actorId: session.user.id,
+        actorName: session.user.name || 'Cliente',
+        metadata: {
+          ticketNumber: ticket.number,
+          previousStatus: ticket.status,
+        },
+      }).catch(() => {});
+    }
+
     // Enviar notificação por email (se não for nota interna)
     if (!finalIsInternal) {
       const ticketUrl = `${process.env.NEXTAUTH_URL}/tickets/${ticket.id}`;
@@ -104,7 +158,7 @@ export async function POST(
       metadata: { ticketNumber: ticket.number, isInternal: finalIsInternal },
     }).catch(() => {});
 
-    return NextResponse.json(message, { status: 201 });
+    return NextResponse.json({ ...message, reopened }, { status: 201 });
   } catch (error) {
     console.error('Error creating message:', error);
     return NextResponse.json(
