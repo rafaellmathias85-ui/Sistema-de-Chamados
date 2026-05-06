@@ -126,10 +126,10 @@ export async function GET(request: NextRequest) {
       page,
       totalPages: Math.ceil(total / limit),
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching tickets:', error);
     return NextResponse.json(
-      { error: 'Erro ao buscar chamados' },
+      { error: 'Erro ao buscar chamados', detail: error?.message || String(error), code: error?.code },
       { status: 500 }
     );
   }
