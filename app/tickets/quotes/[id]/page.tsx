@@ -4,7 +4,13 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
-import { ArrowLeft, Plus, Trash2, Save, Send, CheckCircle2, XCircle, Loader2, Eye, Download } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Save, Send, CheckCircle2, XCircle, Loader2, Eye, Download, Ticket } from 'lucide-react';
+
+/** Formata número do orçamento: se tem ticket vinculado, retorna X-YYYY */
+function formatQuoteNumber(quoteNumber: number, ticketNumber?: number | null): string {
+  if (ticketNumber) return `${quoteNumber}-${ticketNumber}`;
+  return `${quoteNumber}`;
+}
 
 interface QuoteItem {
   id: string;
@@ -145,7 +151,7 @@ export default function QuoteDetailPage() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `orcamento-${quote?.number || id}.pdf`;
+        a.download = `orcamento-${quote?.ticket?.number ? `${quote.number}-${quote.ticket.number}` : quote?.number || id}.pdf`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -167,8 +173,13 @@ export default function QuoteDetailPage() {
         <div className="flex items-center gap-3">
           <Link href="/tickets/quotes" className="p-2 tm-text-secondary hover:tm-text"><ArrowLeft className="w-5 h-5" /></Link>
           <div>
-            <div className="text-blue-400 font-semibold">#{quote.number}</div>
+            <div className="text-blue-400 font-semibold">#{formatQuoteNumber(quote.number, quote.ticket?.number)}</div>
             <h1 className="text-xl font-bold tm-text">{quote.title}</h1>
+            {quote.ticket && (
+              <Link href={`/tickets/${quote.ticket.id}`} className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-blue-400 transition-colors">
+                <Ticket size={12} /> Chamado #{quote.ticket.number} — {quote.ticket.subject}
+              </Link>
+            )}
           </div>
           <span className="px-3 py-1 rounded-full text-xs bg-white/10 tm-text">{STATUS_LABEL[quote.status]}</span>
         </div>
@@ -287,7 +298,7 @@ export default function QuoteDetailPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowPreview(false)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-800">Preview do Orçamento #{quote.number}</h3>
+              <h3 className="text-lg font-semibold text-gray-800">Preview do Orçamento #{formatQuoteNumber(quote.number, quote.ticket?.number)}</h3>
               <div className="flex items-center gap-2">
                 <button onClick={handleDownloadPdf} disabled={downloadingPdf} className="flex items-center gap-1 px-3 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50">
                   {downloadingPdf ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {downloadingPdf ? 'Gerando...' : 'Baixar PDF'}

@@ -53,6 +53,14 @@ export async function POST(request: NextRequest) {
   const { title, description, companyId, ticketId, validUntil, notes, items } = body as any;
   if (!title || typeof title !== 'string') return NextResponse.json({ error: 'Titulo obrigatorio' }, { status: 400 });
 
+  // Ticket é obrigatório
+  if (!ticketId) return NextResponse.json({ error: 'Ticket obrigatório. Selecione um chamado para vincular ao orçamento.' }, { status: 400 });
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true, number: true, companyId: true } });
+  if (!ticket) return NextResponse.json({ error: 'Ticket não encontrado' }, { status: 404 });
+
+  // Auto-preencher companyId do ticket se não informado
+  const resolvedCompanyId = companyId || ticket.companyId || null;
+
   // Itens iniciais (opcional)
   const itemsArr = Array.isArray(items) ? items : [];
   let subtotal = 0;
@@ -74,8 +82,8 @@ export async function POST(request: NextRequest) {
     data: {
       title: title.slice(0, 200),
       description: description || null,
-      companyId: companyId || null,
-      ticketId: ticketId || null,
+      companyId: resolvedCompanyId,
+      ticketId: ticketId,
       validUntil: validUntil ? new Date(validUntil) : null,
       notes: notes || null,
       subtotal,
