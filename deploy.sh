@@ -207,8 +207,13 @@ echo "[Deploy] Migração segura: TicketStatus enum → String (idempotente)..."
 node scripts/migrate-status-enum-to-string.js 2>&1 || echo "[Deploy] ⚠️ Migração de status falhou (verificar logs)"
 
 echo "[Deploy] Prisma db push (sincronizar schema)..."
-yarn prisma db push --skip-generate --accept-data-loss 2>/dev/null || true
-npx tsx scripts/seed.ts 2>/dev/null || echo "[Deploy] Seed falhou (não-crítico)"
+if yarn prisma db push --skip-generate 2>&1; then
+  echo "[Deploy] ✅ Schema sincronizado com sucesso"
+else
+  echo "[Deploy] ⚠️ ATENÇÃO: prisma db push falhou — schema pode estar dessincronizado!"
+  echo "[Deploy] Execute fix_schema_vps.sql manualmente como postgres se necessário"
+fi
+npx tsx scripts/seed.ts 2>&1 || echo "[Deploy] ⚠️ Seed falhou (não-crítico)"
 
 echo "[Deploy] Limpando .next..."
 rm -rf .next

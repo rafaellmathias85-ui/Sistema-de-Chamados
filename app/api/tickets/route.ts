@@ -129,7 +129,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('Error fetching tickets:', error);
     return NextResponse.json(
-      { error: 'Erro ao buscar chamados', detail: error?.message || String(error), code: error?.code },
+      { error: 'Erro ao buscar chamados' },
       { status: 500 }
     );
   }
