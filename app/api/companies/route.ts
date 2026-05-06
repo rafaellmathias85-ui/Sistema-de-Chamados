@@ -77,7 +77,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, cnpj, phone, email, domain } = body;
+    const { name, cnpj, phone, email, domain, clientType } = body;
+
+    // Validar clientType (se fornecido)
+    const VALID_CLIENT_TYPES = ['CONTRATO', 'AVULSO', 'PROJETO', 'PARCEIRO'];
+    let validatedClientType: string | undefined = undefined;
+    if (clientType !== undefined && clientType !== null && clientType !== '') {
+      if (!VALID_CLIENT_TYPES.includes(clientType)) {
+        return NextResponse.json({ error: 'Tipo de cliente inválido. Use: CONTRATO, AVULSO, PROJETO ou PARCEIRO' }, { status: 400 });
+      }
+      validatedClientType = clientType;
+    }
 
     if (!name || !name.trim()) {
       return NextResponse.json({ error: 'Nome é obrigatório' }, { status: 400 });
@@ -163,6 +173,7 @@ export async function POST(request: NextRequest) {
         email: email?.trim().toLowerCase() || null,
         domain: cleanDomain || null,
         needsAttention: false, // Cadastro manual não precisa de atenção
+        ...(validatedClientType ? { clientType: validatedClientType as any } : {}),
       },
       include: {
         _count: { select: { users: true, tickets: true } },

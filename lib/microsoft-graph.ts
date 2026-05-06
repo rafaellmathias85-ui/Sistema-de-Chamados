@@ -897,7 +897,9 @@ export async function processEmailToTicket(
     }
 
     // ===== CRIAR NOVO CHAMADO =====
-    const priority = determinePriority(subject);
+    // Chamados criados via e-mail entram com prioridade "Baixa" por padrão.
+    // O atendente pode ajustar manualmente após triagem.
+    const priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
     const { responseDue, resolutionDue } = calculateSLA(priority);
 
     // Preparar HTML sanitizado + cabeçalho (estilo N-able/Kaseya)

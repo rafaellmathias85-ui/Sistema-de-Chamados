@@ -56,6 +56,7 @@ export default function TicketListPage() {
   const [priorityFilter, setPriorityFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
   const [onlyMyTickets, setOnlyMyTickets] = useState(false);
+  const [slaViolated, setSlaViolated] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalPages, setTotalPages] = useState(1);
@@ -131,7 +132,7 @@ export default function TicketListPage() {
   useEffect(() => {
     fetchTickets();
     fetchStatusCounts();
-  }, [page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets]);
+  }, [page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated]);
 
   // Auto-refresh a cada 1 min (para manter lista sempre atualizada)
   useEffect(() => {
@@ -141,7 +142,7 @@ export default function TicketListPage() {
       fetchStatusCounts();
     }, 60000); // 1 min
     return () => clearInterval(interval);
-  }, [autoRefresh, page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets]);
+  }, [autoRefresh, page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated]);
 
   const fetchTickets = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -155,6 +156,7 @@ export default function TicketListPage() {
       if (search) params.append('search', search);
       if (assigneeFilter) params.append('assigneeId', assigneeFilter);
       if (onlyMyTickets && session?.user?.id) params.append('onlyMine', 'true');
+      if (slaViolated) params.append('slaViolated', 'true');
 
       const res = await fetch(`/api/tickets?${params}`, { cache: 'no-store' });
       if (res.ok) {
@@ -428,6 +430,19 @@ export default function TicketListPage() {
                   <span className="text-sm tm-text flex items-center gap-1">
                     <UserCheck size={16} className="text-accent-blue" />
                     Apenas meus chamados
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={slaViolated}
+                    onChange={(e) => { setSlaViolated(e.target.checked); setPage(1); }}
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-red-500 focus:ring-red-500 focus:ring-offset-0"
+                  />
+                  <span className="text-sm tm-text flex items-center gap-1">
+                    <Clock size={16} className="text-red-400" />
+                    SLA Violado
                   </span>
                 </label>
               </div>

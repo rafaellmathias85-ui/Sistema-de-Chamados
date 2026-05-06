@@ -111,13 +111,35 @@ export async function POST(request: NextRequest) {
       }
 
       const dateStr = new Date(date).toLocaleDateString('pt-BR');
+
+      // Resolve creator (solicitante): try to find a User in the company by email,
+      // fallback to logged-in user if not found. This ensures "Solicitante" shows the
+      // client (not the admin/support user creating the appointment).
+      let resolvedCreatorId: string = session.user.id;
+      if (requesterEmail) {
+        try {
+          const clientUser = await prisma.user.findFirst({
+            where: {
+              email: requesterEmail,
+              companyId: companyId,
+            },
+            select: { id: true },
+          });
+          if (clientUser?.id) {
+            resolvedCreatorId = clientUser.id;
+          }
+        } catch (e) {
+          console.warn('[appointments] Failed to resolve client user by email:', e);
+        }
+      }
+
       const ticket = await prisma.ticket.create({
         data: {
           subject: 'Visita Técnica',
           description: `Visita técnica agendada para ${dateStr} das ${startTime} às ${endTime}.${requesterName ? `\nSolicitante: ${requesterName}` : ''}${requesterEmail ? ` (${requesterEmail})` : ''}${observation ? `\nObservação: ${observation}` : ''}`,
-          status: 'IN_PROGRESS',
+          status: 'OPEN',
           priority: 'MEDIUM',
-          creatorId: session.user.id,
+          creatorId: resolvedCreatorId,
           companyId: companyId,
           assigneeId: technicianId,
         },

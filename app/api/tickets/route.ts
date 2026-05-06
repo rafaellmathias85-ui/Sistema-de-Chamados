@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
     const onlyMine = searchParams.get('onlyMine') === 'true';
     const unassigned = searchParams.get('unassigned') === 'true';
     const slaExpiring = searchParams.get('slaExpiring') === 'true';
+    const slaViolated = searchParams.get('slaViolated') === 'true';
     const reopened = searchParams.get('reopened') === 'true';
     const sort = searchParams.get('sort');
     const order = searchParams.get('order');
@@ -66,6 +67,16 @@ export async function GET(request: NextRequest) {
       const now = new Date();
       where.status = { in: ['OPEN', 'IN_PROGRESS'] };
       where.resolutionDueAt = { gte: now, lte: new Date(now.getTime() + 4 * 60 * 60 * 1000) };
+    }
+    // SLA Violado: chamados ainda não resolvidos cujo prazo de resposta ou resolução já passou.
+    if (slaViolated) {
+      const now = new Date();
+      where.status = { notIn: ['RESOLVED', 'CLOSED'] };
+      where.OR = [
+        ...(where.OR || []),
+        { AND: [{ responseDueAt: { lt: now } }, { firstResponseAt: null }] },
+        { resolutionDueAt: { lt: now } },
+      ];
     }
     if (reopened) {
       where.reopenedFlag = true;
@@ -177,7 +188,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Buscar configuração de SLA para a prioridade
-    const ticketPriority = priority || 'MEDIUM';
+    // Clientes (portal) sempre criam com prioridade "Baixa" — ajuste manual posterior pelo atendente.
+    // Staff pode definir prioridade explicitamente; default "MEDIUM" se não enviada.
+    const ticketPriority = !isStaff ? 'LOW' : (priority || 'MEDIUM');
     const slaConfig = await prisma.sLAConfig.findUnique({
       where: { priority: ticketPriority },
     });
