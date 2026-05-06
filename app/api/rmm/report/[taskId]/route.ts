@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { extractSnmpProbeDeviceId, parseSnmpProbeOutput, updateDeviceStatus } from '@/lib/snmp-utils';
 
 // POST /api/rmm/report/[taskId] — Agente reporta resultado de tarefa
 export async function POST(
@@ -28,6 +29,35 @@ export async function POST(
         executedAt: new Date(),
       },
     });
+
+    // === SNMP Probe: detecta se a tarefa era um probe de rede e processa resultado ===
+    if (task.command && !taskError) {
+      const probeDeviceId = extractSnmpProbeDeviceId(task.command);
+      if (probeDeviceId && output) {
+        try {
+          const probeResult = parseSnmpProbeOutput(output);
+          if (probeResult) {
+            const device = await prisma.snmpDevice.findUnique({
+              where: { id: probeDeviceId },
+              select: { status: true },
+            });
+            if (device) {
+              await updateDeviceStatus(
+                probeDeviceId,
+                probeResult.online,
+                probeResult.latency,
+                device.status
+              );
+              console.log(`[SNMP Proxy] Probe resultado para device ${probeDeviceId}: online=${probeResult.online}, latency=${probeResult.latency}ms, snmpOk=${probeResult.snmpOk}`);
+            }
+          } else {
+            console.warn(`[SNMP Proxy] Não foi possível parsear output do probe para device ${probeDeviceId}`);
+          }
+        } catch (parseErr) {
+          console.error(`[SNMP Proxy] Erro ao processar probe para device ${probeDeviceId}:`, parseErr);
+        }
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

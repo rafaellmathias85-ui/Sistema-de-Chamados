@@ -210,7 +210,7 @@ export default function NetworkPage() {
             className="flex items-center gap-1 px-3 py-2 tm-bg-card hover:bg-white/10 border tm-border tm-text text-sm rounded-lg disabled:opacity-40">
             {polling === 'all' ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} Verificar Todos
           </button>
-          {session?.user?.role === 'ADMIN' && (
+          {['ADMIN','SUPPORT'].includes(session?.user?.role || '') && (
             <button onClick={openAdd}
               className="flex items-center gap-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg">
               <Plus size={16} /> Adicionar
@@ -296,7 +296,7 @@ export default function NetworkPage() {
                     className="flex items-center justify-center gap-1 px-2 py-1.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 text-xs rounded-lg">
                     <Stethoscope size={12} /> Testar
                   </button>
-                  {session?.user?.role === 'ADMIN' && (
+                  {['ADMIN','SUPPORT'].includes(session?.user?.role || '') && (
                     <>
                       <button onClick={() => openEdit(d)}
                         className="p-1.5 tm-text-muted hover:text-blue-400 transition-colors" title="Editar">

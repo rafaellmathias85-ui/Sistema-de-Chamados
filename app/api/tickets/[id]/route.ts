@@ -79,7 +79,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { status, assigneeId, priority, categoryId, forwardToFinance, financialValue, financialNotes, clearAlert, faturado, notaFiscalPath, dataFaturamento, resolveFlow, serviceStartedAt, serviceEndedAt } = body;
+    const { status, assigneeId, priority, categoryId, forwardToFinance, financialValue, financialNotes, clearAlert, faturado, notaFiscalPath, dataFaturamento, rl, resolveFlow, serviceStartedAt, serviceEndedAt } = body;
 
     // Se for apenas para limpar o alerta, faz update rápido e retorna
     if (clearAlert) {
@@ -104,7 +104,7 @@ export async function PATCH(
 
     // Bloquear alterações em tickets encaminhados ao financeiro (exceto operações financeiras por ADMIN/FINANCE)
     if (currentTicket.forwardedToFinance && currentTicket.status === 'CLOSED') {
-      const isFinancialOperation = (faturado !== undefined || notaFiscalPath !== undefined || financialValue !== undefined || financialNotes !== undefined);
+      const isFinancialOperation = (faturado !== undefined || notaFiscalPath !== undefined || financialValue !== undefined || financialNotes !== undefined || rl !== undefined);
       const isFinanceRole = ['ADMIN', 'FINANCE'].includes(session.user.role);
       if (!clearAlert && !(isFinancialOperation && isFinanceRole)) {
         return NextResponse.json({ error: 'Chamado encaminhado ao financeiro não pode ser alterado' }, { status: 403 });
@@ -242,6 +242,20 @@ export async function PATCH(
         action: 'faturado_change',
         fromValue: String(currentTicket.faturado),
         toValue: String(faturado),
+        userId: session.user.id,
+        userName: session.user.name || 'Usuário',
+        userRole: session.user.role,
+      });
+    }
+
+    // Atualizar flag RL (pagamento direto Rafael - apenas FINANCE ou ADMIN)
+    if (rl !== undefined && ['ADMIN', 'FINANCE'].includes(session.user.role)) {
+      updateData.rl = rl;
+      historyEntries.push({
+        ticketId: params.id,
+        action: 'rl_change',
+        fromValue: String(currentTicket.rl),
+        toValue: String(rl),
         userId: session.user.id,
         userName: session.user.name || 'Usuário',
         userRole: session.user.role,

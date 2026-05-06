@@ -593,6 +593,7 @@ model Ticket {
   faturado           Boolean  @default(false)
   dataFaturamento    DateTime?
   notaFiscalPath     String?
+  rl                 Boolean  @default(false)
   
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt

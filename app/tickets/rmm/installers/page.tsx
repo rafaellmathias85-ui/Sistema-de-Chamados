@@ -67,7 +67,7 @@ export default function InstallersPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const isAdmin = session?.user?.role === 'ADMIN';
+  const isAdmin = ['ADMIN','SUPPORT'].includes(session?.user?.role || '');
 
   useEffect(() => {
     fetch('/api/companies').then((r) => r.json()).then((data) => {

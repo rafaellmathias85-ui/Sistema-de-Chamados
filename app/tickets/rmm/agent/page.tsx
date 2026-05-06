@@ -98,7 +98,7 @@ export default function AgentGeneratorPage() {
     }
   };
 
-  if (session?.user?.role !== 'ADMIN') {
+  if (!['ADMIN','SUPPORT'].includes(session?.user?.role || '')) {
     return (
       <div className="text-center py-12">
         <AlertTriangle size={48} className="mx-auto text-yellow-400 mb-4" />

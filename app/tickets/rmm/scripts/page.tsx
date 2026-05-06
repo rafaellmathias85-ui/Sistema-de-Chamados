@@ -66,7 +66,7 @@ export default function ScriptsPage() {
 
   const [form, setForm] = useState({ name: '', description: '', scriptType: 'bat', content: '', companyId: '' });
 
-  const isAdmin = session?.user?.role === 'ADMIN';
+  const isAdmin = ['ADMIN','SUPPORT'].includes(session?.user?.role || '');
 
   const fetchData = async () => {
     try {

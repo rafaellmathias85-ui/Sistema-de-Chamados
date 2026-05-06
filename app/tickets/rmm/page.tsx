@@ -69,7 +69,7 @@ export default function RmmDashboardPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [reactivating, setReactivating] = useState<string | null>(null);
 
-  const isAdmin = session?.user?.role === 'ADMIN';
+  const isAdmin = ['ADMIN','SUPPORT'].includes(session?.user?.role || '');
 
   const fetchData = async () => {
     try {

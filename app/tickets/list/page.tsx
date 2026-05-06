@@ -22,6 +22,7 @@ import {
   PlayCircle,
   PauseCircle,
   Hourglass,
+  EyeOff,
 } from 'lucide-react';
 import ResolveTicketModal from '@/components/resolve-ticket-modal';
 import ExportTicketsModal from '@/components/export-tickets-modal';
@@ -57,6 +58,7 @@ export default function TicketListPage() {
   const [assigneeFilter, setAssigneeFilter] = useState('');
   const [onlyMyTickets, setOnlyMyTickets] = useState(false);
   const [slaViolated, setSlaViolated] = useState(false);
+  const [hideClosed, setHideClosed] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalPages, setTotalPages] = useState(1);
@@ -132,7 +134,7 @@ export default function TicketListPage() {
   useEffect(() => {
     fetchTickets();
     fetchStatusCounts();
-  }, [page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated]);
+  }, [page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed]);
 
   // Auto-refresh a cada 1 min (para manter lista sempre atualizada)
   useEffect(() => {
@@ -142,7 +144,7 @@ export default function TicketListPage() {
       fetchStatusCounts();
     }, 60000); // 1 min
     return () => clearInterval(interval);
-  }, [autoRefresh, page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated]);
+  }, [autoRefresh, page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed]);
 
   const fetchTickets = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -157,6 +159,7 @@ export default function TicketListPage() {
       if (assigneeFilter) params.append('assigneeId', assigneeFilter);
       if (onlyMyTickets && session?.user?.id) params.append('onlyMine', 'true');
       if (slaViolated) params.append('slaViolated', 'true');
+      if (hideClosed) params.append('hideClosed', 'true');
 
       const res = await fetch(`/api/tickets?${params}`, { cache: 'no-store' });
       if (res.ok) {
@@ -443,6 +446,18 @@ export default function TicketListPage() {
                   <span className="text-sm tm-text flex items-center gap-1">
                     <Clock size={16} className="text-red-400" />
                     SLA Violado
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={hideClosed}
+                    onChange={(e) => { setHideClosed(e.target.checked); setPage(1); }}
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-green-500 focus:ring-green-500 focus:ring-offset-0"
+                  />
+                  <span className="text-sm tm-text flex items-center gap-1">
+                    <EyeOff size={16} className="text-gray-400" />
+                    Ocultar Fechados
                   </span>
                 </label>
               </div>

@@ -125,7 +125,7 @@ export default function PlaybooksPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('playbooks');
   const [form, setForm] = useState({ name: '', description: '', trigger: 'CPU_HIGH', condition: '', action: '', scriptType: 'powershell' });
   const [condForm, setCondForm] = useState({ threshold: '90', service: '' });
-  const isAdmin = session?.user?.role === 'ADMIN';
+  const isAdmin = ['ADMIN','SUPPORT'].includes(session?.user?.role || '');
 
   const loadData = useCallback(async () => {
     const [pbRes, mRes] = await Promise.all([

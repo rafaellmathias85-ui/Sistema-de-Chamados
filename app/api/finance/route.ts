@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     const dateField = searchParams.get('dateField') || 'createdAt'; // 'createdAt' | 'dataFaturamento'
     const hasValue = searchParams.get('hasValue');
     const faturadoFilter = searchParams.get('faturado');
+    const rlFilter = searchParams.get('rl');
     const search = searchParams.get('search');
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
@@ -62,6 +63,12 @@ export async function GET(request: NextRequest) {
       where.faturado = false;
     }
 
+    if (rlFilter === 'true') {
+      where.rl = true;
+    } else if (rlFilter === 'false') {
+      where.rl = false;
+    }
+
     // Search by ticket number or subject
     if (search) {
       const num = parseInt(search);
@@ -95,16 +102,36 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
+    // Stats base (sem RL) — RL NÃO soma no Total Geral
+    const baseWhereNoRL = { ...where, rl: false };
+
     const pendingCount = await prisma.ticket.count({
       where: { ...where, financialValue: null },
     });
 
     const faturadoCount = await prisma.ticket.count({
-      where: { ...where, faturado: true },
+      where: { ...where, faturado: true, rl: false },
     });
 
     const faturadoValue = await prisma.ticket.aggregate({
-      where: { ...where, faturado: true },
+      where: { ...where, faturado: true, rl: false },
+      _sum: { financialValue: true },
+    });
+
+    // Total Geral exclui RL
+    const totalNoRL = await prisma.ticket.aggregate({
+      where: baseWhereNoRL,
+      _sum: { financialValue: true },
+      _count: { id: true },
+    });
+
+    // Stats RL separadas
+    const rlCount = await prisma.ticket.count({
+      where: { ...where, rl: true },
+    });
+
+    const rlValue = await prisma.ticket.aggregate({
+      where: { ...where, rl: true },
       _sum: { financialValue: true },
     });
 
@@ -114,11 +141,13 @@ export async function GET(request: NextRequest) {
       page,
       totalPages: Math.ceil(total / limit),
       stats: {
-        totalValue: stats._sum.financialValue || 0,
-        totalTickets: stats._count.id,
+        totalValue: totalNoRL._sum.financialValue || 0,
+        totalTickets: totalNoRL._count.id,
         pendingValue: pendingCount,
         faturadoCount,
         faturadoValue: faturadoValue._sum.financialValue || 0,
+        rlCount,
+        rlValue: rlValue._sum.financialValue || 0,
       },
     });
   } catch (error) {

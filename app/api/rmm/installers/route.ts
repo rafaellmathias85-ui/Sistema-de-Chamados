@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const session = await getSession();
-    if (!session?.user || session.user.role !== 'ADMIN') {
+    if (!session?.user || !['ADMIN','SUPPORT'].includes(session.user.role)) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
     const body = await request.json();

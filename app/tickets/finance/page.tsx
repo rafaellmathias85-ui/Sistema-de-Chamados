@@ -35,6 +35,7 @@ interface FinanceTicket {
   faturado: boolean;
   dataFaturamento: string | null;
   notaFiscalPath: string | null;
+  rl: boolean;
   creator: { name: string; email: string };
   company: { name: string; clientType: string };
   assignee: { name: string } | null;
@@ -54,6 +55,8 @@ interface Stats {
   pendingValue: number;
   faturadoCount: number;
   faturadoValue: number;
+  rlCount: number;
+  rlValue: number;
 }
 
 export default function FinancePage() {
@@ -64,7 +67,7 @@ export default function FinancePage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [stats, setStats] = useState<Stats>({ totalValue: 0, totalTickets: 0, pendingValue: 0, faturadoCount: 0, faturadoValue: 0 });
+  const [stats, setStats] = useState<Stats>({ totalValue: 0, totalTickets: 0, pendingValue: 0, faturadoCount: 0, faturadoValue: 0, rlCount: 0, rlValue: 0 });
 
   // Filtros
   const [companyFilter, setCompanyFilter] = useState('');
@@ -120,7 +123,7 @@ export default function FinancePage() {
         const data = await res.json();
         setTickets(data.tickets || []);
         setTotalPages(data.totalPages || 1);
-        setStats(data.stats || { totalValue: 0, totalTickets: 0, pendingValue: 0, faturadoCount: 0, faturadoValue: 0 });
+        setStats(data.stats || { totalValue: 0, totalTickets: 0, pendingValue: 0, faturadoCount: 0, faturadoValue: 0, rlCount: 0, rlValue: 0 });
       }
     } catch (error) {
       console.error('Error loading tickets:', error);
@@ -227,6 +230,19 @@ export default function FinancePage() {
       if (res.ok) loadTickets();
     } catch (error) {
       console.error('Error toggling faturado:', error);
+    }
+  };
+
+  const toggleRL = async (ticket: FinanceTicket) => {
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rl: !ticket.rl }),
+      });
+      if (res.ok) loadTickets();
+    } catch (error) {
+      console.error('Error toggling RL:', error);
     }
   };
 
@@ -474,7 +490,7 @@ export default function FinancePage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-gradient-to-br from-green-500/20 to-green-600/10 border border-green-500/30 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-green-500/20 rounded-lg"><DollarSign className="w-6 h-6 text-green-400" /></div>
@@ -499,6 +515,15 @@ export default function FinancePage() {
             <div>
               <p className="text-sm tm-text-secondary">Pendentes de Valor</p>
               <p className="text-xl font-bold text-yellow-400">{stats.pendingValue}</p>
+            </div>
+          </div>
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 border border-purple-500/30 rounded-xl p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-purple-500/20 rounded-lg"><DollarSign className="w-6 h-6 text-purple-400" /></div>
+            <div>
+              <p className="text-sm tm-text-secondary">RL ({stats.rlCount})</p>
+              <p className="text-xl font-bold text-purple-400">{formatCurrency(stats.rlValue)}</p>
             </div>
           </div>
         </motion.div>
@@ -602,6 +627,7 @@ export default function FinancePage() {
                 <th className="text-left px-4 py-3 text-xs font-semibold tm-text-secondary uppercase hidden lg:table-cell">Faturado em</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold tm-text-secondary uppercase">Valor</th>
                 <th className="text-center px-4 py-3 text-xs font-semibold tm-text-secondary uppercase">Faturado</th>
+                <th className="text-center px-4 py-3 text-xs font-semibold tm-text-secondary uppercase">RL</th>
                 <th className="text-center px-4 py-3 text-xs font-semibold tm-text-secondary uppercase">NF</th>
                 <th className="text-center px-4 py-3 text-xs font-semibold tm-text-secondary uppercase">Ações</th>
               </tr>
@@ -631,6 +657,13 @@ export default function FinancePage() {
                       ticket.faturado ? 'bg-green-500/30 text-green-400 hover:bg-green-500/40' : 'bg-white/10 text-white-muted hover:bg-white/20'
                     }`} title={ticket.faturado ? 'Faturado' : 'Marcar como faturado'}>
                       {ticket.faturado ? <CheckCircle2 size={16} /> : <Clock size={16} />}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <button onClick={() => toggleRL(ticket)} className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+                      ticket.rl ? 'bg-purple-500/30 text-purple-400 hover:bg-purple-500/40' : 'bg-white/10 text-white-muted hover:bg-white/20'
+                    }`} title={ticket.rl ? 'RL ativo' : 'Marcar como RL'}>
+                      {ticket.rl ? <DollarSign size={16} /> : <DollarSign size={16} />}
                     </button>
                   </td>
                   <td className="px-4 py-3 text-center">

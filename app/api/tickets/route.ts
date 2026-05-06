@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
     const unassigned = searchParams.get('unassigned') === 'true';
     const slaExpiring = searchParams.get('slaExpiring') === 'true';
     const slaViolated = searchParams.get('slaViolated') === 'true';
+    const hideClosed = searchParams.get('hideClosed') === 'true';
     const reopened = searchParams.get('reopened') === 'true';
     const sort = searchParams.get('sort');
     const order = searchParams.get('order');
@@ -80,6 +81,9 @@ export async function GET(request: NextRequest) {
     }
     if (reopened) {
       where.reopenedFlag = true;
+    }
+    if (hideClosed) {
+      where.status = { ...(where.status || {}), notIn: ['CLOSED', 'RESOLVED'] };
     }
 
     // Busca expandida: número, assunto, descrição, domínio da empresa, email do cliente

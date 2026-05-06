@@ -27,7 +27,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const session = await getSession();
-    if (!session?.user || session.user.role !== 'ADMIN') {
+    if (!session?.user || !['ADMIN','SUPPORT'].includes(session.user.role)) {
       return NextResponse.json({ error: 'Apenas administradores' }, { status: 403 });
     }
 

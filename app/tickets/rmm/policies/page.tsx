@@ -51,7 +51,7 @@ export default function PoliciesPage() {
     name: '', companyId: '', cpuThreshold: '', ramThreshold: '', diskThreshold: '', offlineMinutes: '', enabled: true,
   });
 
-  const isAdmin = session?.user?.role === 'ADMIN';
+  const isAdmin = ['ADMIN','SUPPORT'].includes(session?.user?.role || '');
 
   const fetchData = async () => {
     try {
