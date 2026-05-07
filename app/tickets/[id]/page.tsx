@@ -25,6 +25,8 @@ import {
   XCircle,
   Bell,
   ArrowLeftRight,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import Link from 'next/link';
 import ResolveTicketModal from '@/components/resolve-ticket-modal';
@@ -133,6 +135,7 @@ export default function TicketDetailPage() {
   const isStaff = session?.user?.role === 'ADMIN' || session?.user?.role === 'SUPPORT' || session?.user?.role === 'FINANCE';
   const isAdmin = session?.user?.role === 'ADMIN';
   const isFinanceUser = session?.user?.role === 'ADMIN' || session?.user?.role === 'FINANCE';
+  const [showFinancialValue, setShowFinancialValue] = useState(false);
   const alertClearedRef = useRef(false);
 
   useEffect(() => {
@@ -939,23 +942,32 @@ export default function TicketDetailPage() {
             </div>
           )}
 
-          {/* Financeiro */}
+          {/* Financeiro — visível apenas para ADMIN/FINANCE */}
           {isFinanceUser && ticket.forwardedToFinance && (
             <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-green-400 uppercase flex items-center gap-2 mb-3">
                 <DollarSign size={16} />
                 Financeiro
+                <button
+                  onClick={() => setShowFinancialValue(!showFinancialValue)}
+                  className="ml-auto p-1 rounded hover:bg-white/10 transition-colors"
+                  title={showFinancialValue ? 'Ocultar valor' : 'Mostrar valor'}
+                >
+                  {showFinancialValue ? <EyeOff size={14} className="text-green-400" /> : <Eye size={14} className="text-green-400" />}
+                </button>
               </h2>
               <div className="space-y-2">
                 <div>
                   <p className="text-xs tm-text-muted">Valor</p>
                   <p className="tm-text font-medium">
-                    {ticket.financialValue
-                      ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(ticket.financialValue))
-                      : 'Pendente de definição'}
+                    {showFinancialValue
+                      ? (ticket.financialValue
+                          ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(ticket.financialValue))
+                          : 'Pendente de definição')
+                      : '••••••'}
                   </p>
                 </div>
-                {ticket.financialNotes && (
+                {ticket.financialNotes && showFinancialValue && (
                   <div>
                     <p className="text-xs tm-text-muted">Observações</p>
                     <p className="tm-text text-sm whitespace-pre-wrap">{ticket.financialNotes}</p>

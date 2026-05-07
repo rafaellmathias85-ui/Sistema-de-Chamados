@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
-import { ArrowLeft, Plus, Trash2, Save, Send, CheckCircle2, XCircle, Loader2, Eye, Download, Ticket } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Save, Send, CheckCircle2, XCircle, Loader2, Eye, Download, Ticket, RotateCcw, X, Mail } from 'lucide-react';
 
 /** Formata número do orçamento: se tem ticket vinculado, retorna X-YYYY */
 function formatQuoteNumber(quoteNumber: number, ticketNumber?: number | null): string {
@@ -32,6 +32,13 @@ interface Quote {
   validUntil: string | null;
   notes: string | null;
   rejectionReason: string | null;
+  revisionReason: string | null;
+  revisionRequestedBy: string | null;
+  revisionRequestedAt: string | null;
+  sentToEmails: string | null;
+  approvedByName: string | null;
+  rejectedByName: string | null;
+  actionJustification: string | null;
   companyId: string | null;
   ticketId: string | null;
   company?: { id: string; name: string } | null;
@@ -45,8 +52,21 @@ interface Quote {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  DRAFT: 'Rascunho', SENT: 'Enviado', APPROVED: 'Aprovado', REJECTED: 'Rejeitado', EXPIRED: 'Expirado', CANCELLED: 'Cancelado',
+  DRAFT: 'Rascunho', SENT: 'Enviado', APPROVED: 'Aprovado', REJECTED: 'Rejeitado', EXPIRED: 'Expirado', CANCELLED: 'Cancelado', REVISION: 'Em Revisão',
 };
+const STATUS_COLORS: Record<string, string> = {
+  DRAFT: 'bg-gray-500/20 text-gray-300',
+  SENT: 'bg-blue-500/20 text-blue-300',
+  APPROVED: 'bg-green-500/20 text-green-300',
+  REJECTED: 'bg-red-500/20 text-red-300',
+  EXPIRED: 'bg-yellow-500/20 text-yellow-300',
+  CANCELLED: 'bg-gray-500/20 text-gray-400',
+  REVISION: 'bg-amber-500/20 text-amber-300',
+};
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+}
 
 export default function QuoteDetailPage() {
   const { data: session } = useSession();
@@ -64,10 +84,23 @@ export default function QuoteDetailPage() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
 
+  // Modal "Marcar como enviado" com emails
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [sendEmails, setSendEmails] = useState<string[]>([]);
+  const [newEmail, setNewEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [sending, setSending] = useState(false);
+
+  // Modal de ação (client approve/reject/revision)
+  const [actionModal, setActionModal] = useState<{ action: 'APPROVE' | 'REJECT' | 'REVISION' | 'STAFF_APPROVE' | 'STAFF_REJECT' } | null>(null);
+  const [actionJustification, setActionJustification] = useState('');
+
   const role = session?.user?.role;
   const isStaff = role === 'ADMIN' || role === 'SUPPORT' || role === 'FINANCE';
   const isAdmin = role === 'ADMIN';
-  const editable = isStaff && quote?.status === 'DRAFT';
+  const isAdminOrFinance = role === 'ADMIN' || role === 'FINANCE';
+  const isClient = role === 'CLIENT';
+  const editable = isStaff && (quote?.status === 'DRAFT' || quote?.status === 'REVISION');
 
   const load = async () => {
     setLoading(true);
@@ -164,8 +197,91 @@ export default function QuoteDetailPage() {
     } finally { setDownloadingPdf(false); }
   };
 
+  // ── "Marcar como enviado" com destinatários ──
+  const openSendModal = () => {
+    setShowSendModal(true);
+    setSendEmails([]);
+    setNewEmail('');
+    setEmailError('');
+  };
+
+  const addEmail = () => {
+    const email = newEmail.trim();
+    if (!email) return;
+    if (!isValidEmail(email)) { setEmailError('E-mail inválido'); return; }
+    if (sendEmails.includes(email)) { setEmailError('E-mail já adicionado'); return; }
+    setSendEmails([...sendEmails, email]);
+    setNewEmail('');
+    setEmailError('');
+  };
+
+  const removeEmail = (email: string) => {
+    setSendEmails(sendEmails.filter(e => e !== email));
+  };
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const r = await fetch(`/api/quotes/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SENT',
+          sentToEmails: sendEmails.length > 0 ? JSON.stringify(sendEmails) : null,
+        }),
+      });
+      if (r.ok) {
+        setQuote(await r.json());
+        setShowSendModal(false);
+
+        // Enviar email para cada destinatário (fire-and-forget)
+        if (sendEmails.length > 0) {
+          fetch(`/api/quotes/${id}/send-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ emails: sendEmails }),
+          }).catch(() => {});
+        }
+      } else {
+        alert((await r.json()).error || 'Erro ao enviar');
+      }
+    } finally { setSending(false); }
+  };
+
+  // ── Ação do CLIENT ou ADMIN/FINANCE com justificativa ──
+  const handleActionConfirm = async () => {
+    if (!actionModal) return;
+    setSaving(true);
+    try {
+      let body: any;
+      if (isClient) {
+        const clientActionMap: Record<string, string> = { APPROVE: 'APPROVE', REJECT: 'REJECT', REVISION: 'REVISION' };
+        body = { clientAction: clientActionMap[actionModal.action], justification: actionJustification || undefined };
+      } else {
+        const statusMap: Record<string, string> = { APPROVE: 'APPROVED', REJECT: 'REJECTED', STAFF_APPROVE: 'APPROVED', STAFF_REJECT: 'REJECTED' };
+        body = { status: statusMap[actionModal.action], justification: actionJustification || undefined };
+      }
+      const r = await fetch(`/api/quotes/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (r.ok) {
+        setQuote(await r.json());
+        setActionModal(null);
+        setActionJustification('');
+      } else {
+        const err = await r.json();
+        alert(err.error || 'Erro');
+      }
+    } finally { setSaving(false); }
+  };
+
   if (loading) return <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-blue-400" /></div>;
   if (!quote) return <div className="text-center tm-text-muted py-16">Orçamento não encontrado.</div>;
+
+  const actionRequired = !!(actionModal && actionModal.action !== 'APPROVE');
+  const actionTitles: Record<string, string> = {
+    APPROVE: 'Aprovar Orçamento', REJECT: 'Rejeitar Orçamento', REVISION: 'Solicitar Revisão',
+    STAFF_APPROVE: 'Aprovar em Nome do Cliente', STAFF_REJECT: 'Rejeitar em Nome do Cliente',
+  };
+  const actionBtnColor = actionModal && (actionModal.action === 'APPROVE' || actionModal.action === 'STAFF_APPROVE') ? 'bg-green-600 hover:bg-green-700' : actionModal?.action === 'REVISION' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700';
 
   return (
     <div className="space-y-6">
@@ -181,7 +297,7 @@ export default function QuoteDetailPage() {
               </Link>
             )}
           </div>
-          <span className="px-3 py-1 rounded-full text-xs bg-white/10 tm-text">{STATUS_LABEL[quote.status]}</span>
+          <span className={`px-3 py-1 rounded-full text-xs ${STATUS_COLORS[quote.status] || 'bg-white/10 tm-text'}`}>{STATUS_LABEL[quote.status] || quote.status}</span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={handlePreview} disabled={loadingPreview} className="flex items-center gap-1 px-3 py-1.5 rounded bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 text-sm disabled:opacity-50">
@@ -190,20 +306,53 @@ export default function QuoteDetailPage() {
           <button onClick={handleDownloadPdf} disabled={downloadingPdf} className="flex items-center gap-1 px-3 py-1.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-sm disabled:opacity-50">
             {downloadingPdf ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {downloadingPdf ? 'Gerando...' : 'Baixar PDF'}
           </button>
-          {isStaff && quote.status === 'DRAFT' && (
-            <button disabled={saving} onClick={() => patch({ status: 'SENT' })} className="flex items-center gap-1 px-3 py-1.5 rounded bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 text-sm"><Send size={14} /> Marcar como enviado</button>
+
+          {/* Staff: Marcar como enviado */}
+          {isStaff && (quote.status === 'DRAFT' || quote.status === 'REVISION') && (
+            <button disabled={saving} onClick={openSendModal} className="flex items-center gap-1 px-3 py-1.5 rounded bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 text-sm">
+              <Send size={14} /> Marcar como enviado
+            </button>
           )}
-          {isStaff && quote.status === 'SENT' && (
+
+          {/* Staff ADMIN/FINANCE: Aprovar/Rejeitar em nome do cliente */}
+          {isAdminOrFinance && quote.status === 'SENT' && (
             <>
-              <button disabled={saving} onClick={() => patch({ status: 'APPROVED' })} className="flex items-center gap-1 px-3 py-1.5 rounded bg-green-500/20 text-green-300 hover:bg-green-500/30 text-sm"><CheckCircle2 size={14} /> Aprovar</button>
-              <button disabled={saving} onClick={() => { const r = prompt('Motivo da rejeição (opcional):'); patch({ status: 'REJECTED', rejectionReason: r || null }); }} className="flex items-center gap-1 px-3 py-1.5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 text-sm"><XCircle size={14} /> Rejeitar</button>
+              <button disabled={saving} onClick={() => { setActionModal({ action: 'STAFF_APPROVE' }); setActionJustification(''); }} className="flex items-center gap-1 px-3 py-1.5 rounded bg-green-500/20 text-green-300 hover:bg-green-500/30 text-sm"><CheckCircle2 size={14} /> Aprovar</button>
+              <button disabled={saving} onClick={() => { setActionModal({ action: 'STAFF_REJECT' }); setActionJustification(''); }} className="flex items-center gap-1 px-3 py-1.5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 text-sm"><XCircle size={14} /> Rejeitar</button>
             </>
           )}
+
+          {/* Staff: Voltar p/ Rascunho (quando em revisão) */}
+          {isStaff && quote.status === 'REVISION' && (
+            <button disabled={saving} onClick={() => patch({ status: 'DRAFT' })} className="flex items-center gap-1 px-3 py-1.5 rounded bg-gray-500/20 text-gray-300 hover:bg-gray-500/30 text-sm"><RotateCcw size={14} /> Voltar p/ Rascunho</button>
+          )}
+
+          {/* Client: Aprovar / Rejeitar / Solicitar Revisão */}
+          {isClient && quote.status === 'SENT' && (
+            <>
+              <button disabled={saving} onClick={() => { setActionModal({ action: 'APPROVE' }); setActionJustification(''); }} className="flex items-center gap-1 px-3 py-1.5 rounded bg-green-500/20 text-green-300 hover:bg-green-500/30 text-sm"><CheckCircle2 size={14} /> Aprovar</button>
+              <button disabled={saving} onClick={() => { setActionModal({ action: 'REJECT' }); setActionJustification(''); }} className="flex items-center gap-1 px-3 py-1.5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 text-sm"><XCircle size={14} /> Rejeitar</button>
+              <button disabled={saving} onClick={() => { setActionModal({ action: 'REVISION' }); setActionJustification(''); }} className="flex items-center gap-1 px-3 py-1.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 text-sm"><RotateCcw size={14} /> Solicitar Revisão</button>
+            </>
+          )}
+
           {isAdmin && (
             <button onClick={handleDelete} className="px-3 py-1.5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 text-sm flex items-center gap-1"><Trash2 size={14} /> Excluir</button>
           )}
         </div>
       </div>
+
+      {/* Alerta de revisão */}
+      {quote.status === 'REVISION' && quote.revisionReason && (
+        <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+          <div className="flex items-center gap-2 mb-1">
+            <RotateCcw size={16} className="text-amber-400" />
+            <span className="text-sm font-semibold text-amber-300">Revisão solicitada por {quote.revisionRequestedBy}</span>
+            {quote.revisionRequestedAt && <span className="text-xs text-amber-400/70">em {new Date(quote.revisionRequestedAt).toLocaleString('pt-BR')}</span>}
+          </div>
+          <p className="text-sm tm-text ml-6">{quote.revisionReason}</p>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Left: dados */}
@@ -286,12 +435,97 @@ export default function QuoteDetailPage() {
             <div>Criado por: <span className="tm-text">{quote.createdByName}</span></div>
             <div>Data: {new Date(quote.createdAt).toLocaleString('pt-BR')}</div>
             {quote.sentAt && <div>Enviado em: {new Date(quote.sentAt).toLocaleString('pt-BR')}</div>}
-            {quote.approvedAt && <div className="text-green-400">Aprovado em: {new Date(quote.approvedAt).toLocaleString('pt-BR')}</div>}
-            {quote.rejectedAt && <div className="text-red-400">Rejeitado em: {new Date(quote.rejectedAt).toLocaleString('pt-BR')}</div>}
+            {quote.sentToEmails && (() => { try { const emails = JSON.parse(quote.sentToEmails); return Array.isArray(emails) && emails.length > 0 ? <div className="flex items-center gap-1"><Mail size={12} className="text-blue-400" /> Enviado para: {emails.join(', ')}</div> : null; } catch { return null; } })()}
+            {quote.approvedAt && <div className="text-green-400">Aprovado em: {new Date(quote.approvedAt).toLocaleString('pt-BR')}{quote.approvedByName ? ` por ${quote.approvedByName}` : ''}</div>}
+            {quote.rejectedAt && <div className="text-red-400">Rejeitado em: {new Date(quote.rejectedAt).toLocaleString('pt-BR')}{quote.rejectedByName ? ` por ${quote.rejectedByName}` : ''}</div>}
             {quote.rejectionReason && <div className="text-red-300">Motivo: {quote.rejectionReason}</div>}
+            {quote.actionJustification && quote.actionJustification !== quote.rejectionReason && <div className="tm-text-secondary">Justificativa: {quote.actionJustification}</div>}
           </div>
         </div>
       </div>
+
+      {/* Modal "Marcar como enviado" */}
+      {showSendModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowSendModal(false)}>
+          <div className="bg-[#1e293b] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+              <h3 className="text-lg font-semibold text-white">Marcar como Enviado</h3>
+              <button onClick={() => setShowSendModal(false)} className="p-1.5 rounded hover:bg-white/10 text-gray-400"><X size={18} /></button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <p className="text-sm text-gray-400">Adicione os e-mails dos destinatários para enviar notificação do orçamento. Você pode enviar sem destinatários (sem email).</p>
+
+              {/* Lista de emails */}
+              {sendEmails.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {sendEmails.map(email => (
+                    <span key={email} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs">
+                      <Mail size={12} /> {email}
+                      <button onClick={() => removeEmail(email)} className="ml-1 hover:text-red-300"><X size={12} /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Input novo email */}
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  value={newEmail}
+                  onChange={(e) => { setNewEmail(e.target.value); setEmailError(''); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEmail(); } }}
+                  placeholder="email@exemplo.com"
+                  className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:border-blue-500 outline-none placeholder:text-gray-500"
+                />
+                <button onClick={addEmail} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700">
+                  <Plus size={16} />
+                </button>
+              </div>
+              {emailError && <p className="text-xs text-red-400">{emailError}</p>}
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-white/10">
+              <button onClick={() => setShowSendModal(false)} className="px-4 py-2 rounded-lg bg-white/10 text-gray-300 text-sm hover:bg-white/20">Cancelar</button>
+              <button onClick={handleSend} disabled={sending} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
+                {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {sendEmails.length > 0 ? `Enviar para ${sendEmails.length} destinatário(s)` : 'Marcar como enviado'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de ação com justificativa */}
+      {actionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setActionModal(null)}>
+          <div className="bg-[#1e293b] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+              <h3 className="text-lg font-semibold text-white">{actionTitles[actionModal.action]}</h3>
+              <button onClick={() => setActionModal(null)} className="p-1.5 rounded hover:bg-white/10 text-gray-400"><X size={18} /></button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <textarea
+                value={actionJustification}
+                onChange={(e) => setActionJustification(e.target.value)}
+                placeholder={actionRequired ? 'Justificativa (obrigatória)...' : 'Justificativa (opcional)...'}
+                rows={3}
+                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:border-blue-500 outline-none placeholder:text-gray-500 resize-none"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-white/10">
+              <button onClick={() => setActionModal(null)} className="px-4 py-2 rounded-lg bg-white/10 text-gray-300 text-sm hover:bg-white/20">Cancelar</button>
+              <button
+                onClick={handleActionConfirm}
+                disabled={saving || (actionRequired && !actionJustification.trim())}
+                className={`px-4 py-2 rounded-lg text-white text-sm disabled:opacity-40 ${actionBtnColor}`}
+              >
+                {saving ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null}
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Preview Modal */}
       {showPreview && (

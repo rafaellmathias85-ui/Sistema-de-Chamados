@@ -1160,13 +1160,26 @@ model Quote {
   number          Int          @unique @default(autoincrement())
   title           String
   description     String?      @db.Text
-  status          String       @default("DRAFT") // DRAFT, SENT, APPROVED, REJECTED, EXPIRED, CANCELLED
+  status          String       @default("DRAFT") // DRAFT, SENT, APPROVED, REJECTED, EXPIRED, CANCELLED, REVISION
   subtotal        Float        @default(0)
   discount        Float        @default(0)   // valor absoluto de desconto
   total           Float        @default(0)
   validUntil      DateTime?
   notes           String?      @db.Text
   rejectionReason String?      @db.Text
+
+  // Revisão solicitada pelo cliente
+  revisionReason       String?   @db.Text
+  revisionRequestedAt  DateTime?
+  revisionRequestedBy  String?   // Nome do usuário que solicitou revisão
+
+  // Emails para quem o orçamento foi enviado
+  sentToEmails    String?      @db.Text  // JSON array de emails
+
+  // Quem aprovou/rejeitou
+  approvedByName  String?
+  rejectedByName  String?
+  actionJustification String?  @db.Text  // Justificativa da ação (aprovação/rejeição por admin)
 
   companyId       String?
   company         Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)

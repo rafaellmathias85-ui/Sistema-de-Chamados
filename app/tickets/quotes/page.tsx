@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FileText, Plus, Search, Loader2, CheckCircle2, XCircle, Clock, Send, X, Ticket } from 'lucide-react';
+import { FileText, Plus, Search, Loader2, CheckCircle2, XCircle, Clock, Send, X, Ticket, RotateCcw } from 'lucide-react';
 
 interface QuoteRow {
   id: string;
@@ -16,6 +16,11 @@ interface QuoteRow {
   createdByName?: string;
   sentAt?: string | null;
   validUntil?: string | null;
+  revisionReason?: string | null;
+  revisionRequestedBy?: string | null;
+  revisionRequestedAt?: string | null;
+  approvedByName?: string | null;
+  rejectedByName?: string | null;
   company?: { id: string; name: string } | null;
   ticket?: { id: string; number: number; subject?: string } | null;
   _count?: { items: number };
@@ -41,6 +46,7 @@ const STATUS_COLORS: Record<string, string> = {
   REJECTED: 'bg-red-500/20 text-red-300',
   EXPIRED: 'bg-yellow-500/20 text-yellow-300',
   CANCELLED: 'bg-gray-500/20 text-gray-400',
+  REVISION: 'bg-amber-500/20 text-amber-300',
 };
 const STATUS_LABEL: Record<string, string> = {
   DRAFT: 'Rascunho',
@@ -49,9 +55,67 @@ const STATUS_LABEL: Record<string, string> = {
   REJECTED: 'Rejeitado',
   EXPIRED: 'Expirado',
   CANCELLED: 'Cancelado',
+  REVISION: 'Em Revisão',
 };
 
 type TabType = 'all' | 'approval';
+
+// Modal de ação com justificativa
+function ActionModal({ action, onConfirm, onClose }: {
+  action: 'APPROVE' | 'REJECT' | 'REVISION' | 'STAFF_APPROVE' | 'STAFF_REJECT';
+  onConfirm: (justification: string) => void;
+  onClose: () => void;
+}) {
+  const [justification, setJustification] = useState('');
+  const titles: Record<string, string> = {
+    APPROVE: 'Aprovar Orçamento',
+    REJECT: 'Rejeitar Orçamento',
+    REVISION: 'Solicitar Revisão',
+    STAFF_APPROVE: 'Aprovar em Nome do Cliente',
+    STAFF_REJECT: 'Rejeitar em Nome do Cliente',
+  };
+  const descriptions: Record<string, string> = {
+    APPROVE: 'Confirme a aprovação deste orçamento.',
+    REJECT: 'Informe o motivo da rejeição. (obrigatório)',
+    REVISION: 'Descreva o que precisa ser revisado. (obrigatório)',
+    STAFF_APPROVE: 'Informe a justificativa para aprovar em nome do cliente. (obrigatório)',
+    STAFF_REJECT: 'Informe a justificativa para rejeitar em nome do cliente. (obrigatório)',
+  };
+  const required = action !== 'APPROVE';
+  const btnColor = action === 'APPROVE' || action === 'STAFF_APPROVE' ? 'bg-green-600 hover:bg-green-700' : action === 'REVISION' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="bg-[#1e293b] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <h3 className="text-lg font-semibold text-white">{titles[action]}</h3>
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-white/10 text-gray-400"><X size={18} /></button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-sm text-gray-400">{descriptions[action]}</p>
+          <textarea
+            value={justification}
+            onChange={(e) => setJustification(e.target.value)}
+            placeholder={required ? 'Justificativa...' : 'Justificativa (opcional)...'}
+            rows={3}
+            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:border-blue-500 outline-none placeholder:text-gray-500 resize-none"
+            autoFocus
+          />
+        </div>
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-white/10">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/10 text-gray-300 text-sm hover:bg-white/20">Cancelar</button>
+          <button
+            onClick={() => onConfirm(justification)}
+            disabled={required && !justification.trim()}
+            className={`px-4 py-2 rounded-lg text-white text-sm disabled:opacity-40 ${btnColor}`}
+          >
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function QuotesListPage() {
   const { data: session } = useSession();
@@ -63,6 +127,9 @@ export default function QuotesListPage() {
   const [tab, setTab] = useState<TabType>('all');
   const [approving, setApproving] = useState<string | null>(null);
 
+  // Modal de ação
+  const [actionModal, setActionModal] = useState<{ quoteId: string; action: 'APPROVE' | 'REJECT' | 'REVISION' | 'STAFF_APPROVE' | 'STAFF_REJECT' } | null>(null);
+
   // Modal de seleção de ticket para novo orçamento
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [ticketSearch, setTicketSearch] = useState('');
@@ -72,6 +139,8 @@ export default function QuotesListPage() {
 
   const role = session?.user?.role;
   const isStaff = role === 'ADMIN' || role === 'SUPPORT' || role === 'FINANCE';
+  const isAdminOrFinance = role === 'ADMIN' || role === 'FINANCE';
+  const isClient = role === 'CLIENT';
   const canCreate = isStaff;
 
   const load = async () => {
@@ -80,7 +149,7 @@ export default function QuotesListPage() {
       const params = new URLSearchParams();
       if (search) params.set('search', search);
       if (tab === 'approval') {
-        params.set('status', 'SENT');
+        // Nada — buscar tudo e filtrar SENT no front
       } else if (statusFilter) {
         params.set('status', statusFilter);
       }
@@ -135,25 +204,33 @@ export default function QuotesListPage() {
     }
   };
 
-  const handleApprove = async (quoteId: string) => {
+  const handleActionConfirm = async (justification: string) => {
+    if (!actionModal) return;
+    const { quoteId, action } = actionModal;
     setApproving(quoteId);
+    setActionModal(null);
     try {
-      const r = await fetch(`/api/quotes/${quoteId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'APPROVED' }) });
+      let body: any;
+      if (isClient) {
+        // CLIENT usa clientAction
+        const clientActionMap: Record<string, string> = { APPROVE: 'APPROVE', REJECT: 'REJECT', REVISION: 'REVISION' };
+        body = { clientAction: clientActionMap[action], justification: justification || undefined };
+      } else {
+        // STAFF usa status diretamente
+        const statusMap: Record<string, string> = { APPROVE: 'APPROVED', REJECT: 'REJECTED', STAFF_APPROVE: 'APPROVED', STAFF_REJECT: 'REJECTED' };
+        body = { status: statusMap[action], justification: justification || undefined };
+      }
+      const r = await fetch(`/api/quotes/${quoteId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (r.ok) load();
-      else alert('Erro ao aprovar');
+      else {
+        const err = await r.json();
+        alert(err.error || 'Erro ao processar ação');
+      }
     } finally { setApproving(null); }
   };
 
-  const handleReject = async (quoteId: string) => {
-    const reason = prompt('Motivo da rejeição (opcional):');
-    setApproving(quoteId);
-    try {
-      const r = await fetch(`/api/quotes/${quoteId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'REJECTED', rejectionReason: reason || null }) });
-      if (r.ok) load();
-      else alert('Erro ao rejeitar');
-    } finally { setApproving(null); }
-  };
-
+  // Filtrar para mesa de aprovação: SENT + REVISION
+  const approvalQuotes = quotes.filter(q => q.status === 'SENT' || q.status === 'REVISION');
   const sentCount = quotes.filter(q => q.status === 'SENT').length;
 
   return (
@@ -170,26 +247,24 @@ export default function QuotesListPage() {
         )}
       </div>
 
-      {/* Tabs */}
-      {isStaff && (
-        <div className="flex gap-1 p-1 bg-white/5 rounded-lg w-fit">
-          <button
-            onClick={() => setTab('all')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === 'all' ? 'bg-blue-600 text-white' : 'tm-text-secondary hover:tm-text hover:bg-white/10'}`}
-          >
-            <FileText size={14} className="inline mr-1.5 -mt-0.5" /> Todos
-          </button>
-          <button
-            onClick={() => setTab('approval')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${tab === 'approval' ? 'bg-orange-600 text-white' : 'tm-text-secondary hover:tm-text hover:bg-white/10'}`}
-          >
-            <Clock size={14} /> Mesa de Aprovação
-            {tab !== 'approval' && sentCount > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 rounded-full bg-orange-500 text-white text-xs font-bold">{sentCount}</span>
-            )}
-          </button>
-        </div>
-      )}
+      {/* Tabs — visível para staff E client */}
+      <div className="flex gap-1 p-1 bg-white/5 rounded-lg w-fit">
+        <button
+          onClick={() => setTab('all')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === 'all' ? 'bg-blue-600 text-white' : 'tm-text-secondary hover:tm-text hover:bg-white/10'}`}
+        >
+          <FileText size={14} className="inline mr-1.5 -mt-0.5" /> {isClient ? 'Meus Orçamentos' : 'Todos'}
+        </button>
+        <button
+          onClick={() => setTab('approval')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${tab === 'approval' ? 'bg-orange-600 text-white' : 'tm-text-secondary hover:tm-text hover:bg-white/10'}`}
+        >
+          <Clock size={14} /> Mesa de Aprovação
+          {tab !== 'approval' && sentCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-orange-500 text-white text-xs font-bold">{sentCount}</span>
+          )}
+        </button>
+      </div>
 
       {/* Filters - only show on "all" tab */}
       {tab === 'all' && (
@@ -218,25 +293,26 @@ export default function QuotesListPage() {
         <div className="space-y-4">
           <div className="flex items-center gap-2 text-sm tm-text-secondary">
             <Send size={16} className="text-orange-400" />
-            <span>Orçamentos enviados aguardando aprovação ou rejeição</span>
+            <span>{isClient ? 'Orçamentos aguardando sua aprovação' : 'Orçamentos enviados aguardando aprovação ou rejeição'}</span>
           </div>
           <div className="tm-bg-card border tm-border rounded-2xl overflow-hidden">
             {loading ? (
               <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-blue-400" /></div>
-            ) : quotes.length === 0 ? (
+            ) : approvalQuotes.length === 0 ? (
               <div className="text-center py-16 tm-text-muted">
                 <CheckCircle2 className="w-12 h-12 mx-auto mb-3 text-green-400/50" />
                 <p>Nenhum orçamento pendente de aprovação</p>
               </div>
             ) : (
               <div className="divide-y tm-border">
-                {quotes.map((q) => (
+                {approvalQuotes.map((q) => (
                   <div key={q.id} className="p-4 hover:bg-white/5 transition-colors">
                     <div className="flex items-start justify-between gap-4 flex-wrap">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-blue-400 font-semibold">#{formatQuoteNumber(q.number, q.ticket?.number)}</span>
                           <span className="tm-text font-medium truncate">{q.title}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLORS[q.status]}`}>{STATUS_LABEL[q.status]}</span>
                         </div>
                         <div className="flex items-center gap-4 text-xs tm-text-secondary flex-wrap">
                           <span>Empresa: <strong className="tm-text">{q.company?.name || '—'}</strong></span>
@@ -245,8 +321,13 @@ export default function QuotesListPage() {
                           {q.validUntil && <span>Válido até: {new Date(q.validUntil).toLocaleDateString('pt-BR')}</span>}
                           <span>{q._count?.items || 0} itens</span>
                         </div>
+                        {q.status === 'REVISION' && q.revisionReason && (
+                          <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                            <p className="text-xs text-amber-300"><strong>Revisão solicitada por {q.revisionRequestedBy}:</strong> {q.revisionReason}</p>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <div className="text-right mr-3">
                           <div className="text-xs tm-text-muted">Total</div>
                           <div className="text-lg font-bold tm-text font-mono">R$ {q.total.toFixed(2)}</div>
@@ -257,20 +338,73 @@ export default function QuotesListPage() {
                         >
                           Ver detalhes
                         </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleApprove(q.id); }}
-                          disabled={approving === q.id}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded bg-green-500/20 text-green-300 hover:bg-green-500/30 text-sm disabled:opacity-50"
-                        >
-                          {approving === q.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Aprovar
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleReject(q.id); }}
-                          disabled={approving === q.id}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 text-sm disabled:opacity-50"
-                        >
-                          <XCircle size={14} /> Rejeitar
-                        </button>
+                        {/* Ações para CLIENT — status SENT */}
+                        {isClient && q.status === 'SENT' && (
+                          <>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setActionModal({ quoteId: q.id, action: 'APPROVE' }); }}
+                              disabled={approving === q.id}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded bg-green-500/20 text-green-300 hover:bg-green-500/30 text-sm disabled:opacity-50"
+                            >
+                              <CheckCircle2 size={14} /> Aprovar
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setActionModal({ quoteId: q.id, action: 'REJECT' }); }}
+                              disabled={approving === q.id}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 text-sm disabled:opacity-50"
+                            >
+                              <XCircle size={14} /> Rejeitar
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setActionModal({ quoteId: q.id, action: 'REVISION' }); }}
+                              disabled={approving === q.id}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 text-sm disabled:opacity-50"
+                            >
+                              <RotateCcw size={14} /> Solicitar Revisão
+                            </button>
+                          </>
+                        )}
+                        {/* Ações para STAFF — status SENT */}
+                        {isStaff && q.status === 'SENT' && (
+                          <>
+                            {isAdminOrFinance && (
+                              <>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setActionModal({ quoteId: q.id, action: 'STAFF_APPROVE' }); }}
+                                  disabled={approving === q.id}
+                                  className="flex items-center gap-1 px-3 py-1.5 rounded bg-green-500/20 text-green-300 hover:bg-green-500/30 text-sm disabled:opacity-50"
+                                >
+                                  {approving === q.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Aprovar
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setActionModal({ quoteId: q.id, action: 'STAFF_REJECT' }); }}
+                                  disabled={approving === q.id}
+                                  className="flex items-center gap-1 px-3 py-1.5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 text-sm disabled:opacity-50"
+                                >
+                                  <XCircle size={14} /> Rejeitar
+                                </button>
+                              </>
+                            )}
+                          </>
+                        )}
+                        {/* STAFF — status REVISION: botão para voltar ao rascunho */}
+                        {isStaff && q.status === 'REVISION' && (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setApproving(q.id);
+                              try {
+                                const r = await fetch(`/api/quotes/${q.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'DRAFT' }) });
+                                if (r.ok) load();
+                                else alert('Erro ao voltar para rascunho');
+                              } finally { setApproving(null); }
+                            }}
+                            disabled={approving === q.id}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded bg-gray-500/20 text-gray-300 hover:bg-gray-500/30 text-sm disabled:opacity-50"
+                          >
+                            <RotateCcw size={14} /> Voltar p/ Rascunho
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -293,7 +427,7 @@ export default function QuotesListPage() {
                   <th className="px-4 py-3">Nº</th>
                   <th className="px-4 py-3">Título</th>
                   <th className="px-4 py-3">Chamado</th>
-                  <th className="px-4 py-3">Empresa</th>
+                  {!isClient && <th className="px-4 py-3">Empresa</th>}
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Total</th>
                   <th className="px-4 py-3">Validade</th>
@@ -317,7 +451,7 @@ export default function QuotesListPage() {
                         </span>
                       ) : '—'}
                     </td>
-                    <td className="px-4 py-3 tm-text-secondary">{q.company?.name || '—'}</td>
+                    {!isClient && <td className="px-4 py-3 tm-text-secondary">{q.company?.name || '—'}</td>}
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLORS[q.status] || 'bg-white/10 tm-text'}`}>
                         {STATUS_LABEL[q.status] || q.status}
@@ -337,6 +471,16 @@ export default function QuotesListPage() {
           )}
         </div>
       )}
+
+      {/* Modal de ação com justificativa */}
+      {actionModal && (
+        <ActionModal
+          action={actionModal.action}
+          onConfirm={handleActionConfirm}
+          onClose={() => setActionModal(null)}
+        />
+      )}
+
       {/* Modal de seleção de ticket para novo orçamento */}
       {showTicketModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowTicketModal(false)}>

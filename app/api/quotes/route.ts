@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   const where: any = {};
   if (session.user.role === 'CLIENT') {
     where.companyId = session.user.companyId;
-    where.status = { in: ['SENT', 'APPROVED', 'REJECTED', 'EXPIRED'] };
+    where.status = { in: ['SENT', 'APPROVED', 'REJECTED', 'EXPIRED', 'REVISION'] };
   }
   if (status) where.status = status;
   if (companyId) where.companyId = companyId;
