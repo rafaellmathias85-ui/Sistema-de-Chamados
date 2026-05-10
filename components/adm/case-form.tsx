@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Save, Trash2, Plus, X } from 'lucide-react';
+import ImageUploader from './image-uploader';
 
 function slugify(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -95,8 +96,13 @@ export default function CaseForm({ initialData }: { initialData?: any }) {
           <textarea className={input} rows={6} value={form.content} onChange={(e) => update('content', e.target.value)} />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">URL da imagem</label>
-          <input className={input} value={form.imageUrl} onChange={(e) => update('imageUrl', e.target.value)} />
+          <label className="block text-sm font-medium text-slate-700 mb-1">Imagem de capa</label>
+          <ImageUploader
+            value={form.imageUrl}
+            onChange={(v) => update('imageUrl', v)}
+            recommended="Recomendado: 1200×675px (proporção 16:9), JPG ou WEBP, até 1MB. Use uma imagem que represente o segmento do cliente."
+            accentColor="orange"
+          />
         </div>
         <div>
           <div className="flex items-center justify-between mb-2">

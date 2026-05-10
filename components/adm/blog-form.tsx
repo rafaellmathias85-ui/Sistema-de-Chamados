@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Save, Trash2 } from 'lucide-react';
+import ImageUploader from './image-uploader';
 
 function slugify(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -76,8 +77,13 @@ export default function BlogForm({ initialData }: { initialData?: any }) {
           <textarea className={input} rows={10} value={form.content} onChange={(e) => update('content', e.target.value)} placeholder="Use linhas em branco para separar parágrafos." />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">URL da imagem</label>
-          <input className={input} value={form.imageUrl} onChange={(e) => update('imageUrl', e.target.value)} placeholder="https://..." />
+          <label className="block text-sm font-medium text-slate-700 mb-1">Imagem de capa</label>
+          <ImageUploader
+            value={form.imageUrl}
+            onChange={(v) => update('imageUrl', v)}
+            recommended="Recomendado: 1200×630px (proporção 16:9), JPG ou WEBP, até 1MB. Aparece no card do blog e ao compartilhar nas redes sociais."
+            accentColor="blue"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Link externo (opcional)</label>
