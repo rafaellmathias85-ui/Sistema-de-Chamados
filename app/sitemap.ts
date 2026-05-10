@@ -1,5 +1,8 @@
 import type { MetadataRoute } from 'next';
 import { headers } from 'next/headers';
+import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 function getSiteUrl() {
   try {
@@ -11,9 +14,14 @@ function getSiteUrl() {
   return process.env.NEXT_PUBLIC_SITE_URL || 'https://wticorp.com.br';
 }
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = getSiteUrl();
   const now = new Date();
+
+  const [posts, cases] = await Promise.all([
+    prisma.blogPost.findMany({ where: { isPublished: true, link: null }, select: { slug: true, updatedAt: true } }).catch(() => []),
+    prisma.caseStudy.findMany({ where: { isPublished: true }, select: { slug: true, updatedAt: true } }).catch(() => []),
+  ]);
 
   const services = [
     'cyber-security',
@@ -42,5 +50,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.8,
   }));
 
-  return [...staticPages, ...servicePages];
+  const blogPages: MetadataRoute.Sitemap = posts.map((p) => ({
+    url: `${base}/blog/${p.slug}`,
+    lastModified: p.updatedAt,
+    changeFrequency: 'monthly',
+    priority: 0.6,
+  }));
+
+  return [...staticPages, ...servicePages, ...blogPages];
 }

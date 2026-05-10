@@ -2,7 +2,10 @@ import type { Metadata } from 'next';
 import Header from '@/components/header';
 import Footer from '@/components/footer';
 import Link from 'next/link';
-import { ArrowRight, Building2, TrendingUp, Shield } from 'lucide-react';
+import { ArrowRight, Building2 } from 'lucide-react';
+import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Cases de Sucesso | Resultados reais de clientes',
@@ -11,46 +14,12 @@ export const metadata: Metadata = {
   alternates: { canonical: '/cases' },
 };
 
-const CASES = [
-  {
-    industry: 'Indústria',
-    icon: Building2,
-    title: 'Migração crítica para Azure com zero downtime',
-    summary:
-      'Migração de ERP de cliente industrial com múltiplas filiais, mantendo 100% de uptime durante a janela.',
-    metrics: [
-      { label: 'Downtime', value: '0min' },
-      { label: 'Redução de TCO', value: '32%' },
-      { label: 'SLA pós-go-live', value: '99,95%' },
-    ],
-  },
-  {
-    industry: 'Serviços Financeiros',
-    icon: Shield,
-    title: 'Implementação de Zero Trust e LGPD',
-    summary:
-      'Hardening completo, MFA obrigatório, segregação de redes e adequação LGPD em 90 dias.',
-    metrics: [
-      { label: 'Tentativas de phishing bloqueadas', value: '+98%' },
-      { label: 'Compliance LGPD', value: '100%' },
-      { label: 'Tempo de detecção', value: '< 5min' },
-    ],
-  },
-  {
-    industry: 'Varejo',
-    icon: TrendingUp,
-    title: 'Monitoramento 24/7 e helpdesk gerenciado',
-    summary:
-      'Centralização do atendimento de TI de uma rede de lojas com NOC próprio.',
-    metrics: [
-      { label: 'Reabertura de chamados', value: '-65%' },
-      { label: 'Tempo médio de resposta', value: '< 2min' },
-      { label: 'Satisfação do usuário', value: '4,8/5' },
-    ],
-  },
-];
+export default async function CasesPage() {
+  const cases = await prisma.caseStudy.findMany({
+    where: { isPublished: true },
+    orderBy: [{ order: 'asc' }, { createdAt: 'desc' }],
+  });
 
-export default function CasesPage() {
   return (
     <main className="min-h-screen bg-navy">
       <Header />
@@ -66,31 +35,40 @@ export default function CasesPage() {
           </div>
 
           <div className="space-y-8">
-            {CASES.map((c, i) => {
-              const Icon = c.icon;
+            {cases.map((c) => {
+              const metrics = (Array.isArray(c.metrics) ? c.metrics : []) as { label: string; value: string }[];
               return (
-                <article key={i} className="bg-[#112240]/50 border border-white/10 rounded-2xl p-8 md:p-10">
+                <article key={c.id} className="bg-[#112240]/50 border border-white/10 rounded-2xl p-8 md:p-10">
                   <div className="flex items-start gap-4 mb-6">
                     <div className="w-12 h-12 rounded-xl bg-accent-blue/10 flex items-center justify-center flex-shrink-0">
-                      <Icon className="w-6 h-6 text-accent-blue" />
+                      <Building2 className="w-6 h-6 text-accent-blue" />
                     </div>
                     <div>
-                      <span className="text-accent-blue text-sm font-semibold">{c.industry}</span>
+                      <span className="text-accent-blue text-sm font-semibold">{c.theme}</span>
                       <h2 className="font-montserrat font-semibold text-2xl text-white mt-1">{c.title}</h2>
                     </div>
                   </div>
+                  {c.imageUrl && (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={c.imageUrl} alt={c.title} className="w-full rounded-xl mb-6 max-h-80 object-cover" />
+                  )}
                   <p className="text-gray-300 mb-6 leading-relaxed">{c.summary}</p>
-                  <div className="grid grid-cols-3 gap-4">
-                    {c.metrics.map((m) => (
-                      <div key={m.label} className="bg-navy/50 rounded-xl p-4 text-center border border-white/5">
-                        <div className="font-montserrat font-bold text-2xl text-accent-blue">{m.value}</div>
-                        <div className="text-xs text-gray-400 mt-1">{m.label}</div>
-                      </div>
-                    ))}
-                  </div>
+                  {metrics.length > 0 && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {metrics.map((m, i) => (
+                        <div key={i} className="bg-navy/50 rounded-xl p-4 text-center border border-white/5">
+                          <div className="font-montserrat font-bold text-2xl text-accent-blue">{m.value}</div>
+                          <div className="text-xs text-gray-400 mt-1">{m.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </article>
               );
             })}
+            {cases.length === 0 && (
+              <p className="text-gray-400 text-center">Nenhum case publicado.</p>
+            )}
           </div>
 
           <div className="mt-16 text-center">

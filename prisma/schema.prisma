@@ -1214,3 +1214,38 @@ model QuoteItem {
 
   @@index([quoteId])
 }
+
+model BlogPost {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  excerpt     String
+  content     String
+  imageUrl    String?
+  link        String?
+  category    String   @default("Tecnologia")
+  author      String   @default("Equipe Winner")
+  isPublished Boolean  @default(true)
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isPublished, publishedAt])
+}
+
+model CaseStudy {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  theme       String
+  title       String
+  summary     String
+  content     String?
+  imageUrl    String?
+  metrics     Json?
+  isPublished Boolean  @default(true)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isPublished, order])
+}

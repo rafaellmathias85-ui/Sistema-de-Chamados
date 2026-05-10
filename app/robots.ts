@@ -18,7 +18,7 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: '*',
         allow: '/',
-        disallow: ['/api/', '/tickets/', '/login', '/forgot-password', '/chamado-whatsapp'],
+        disallow: ['/api/', '/tickets/', '/adm', '/adm/', '/login', '/forgot-password', '/chamado-whatsapp'],
       },
     ],
     sitemap: `${base}/sitemap.xml`,

@@ -4,52 +4,51 @@ import { notFound } from 'next/navigation';
 import Script from 'next/script';
 import Header from '@/components/header';
 import Footer from '@/components/footer';
-import { BLOG_POSTS, getPostBySlug } from '@/lib/blog-data';
-import { Calendar, Clock, ChevronRight, ArrowLeft } from 'lucide-react';
+import { prisma } from '@/lib/db';
+import { Calendar, ChevronRight, ArrowLeft } from 'lucide-react';
 
-export function generateStaticParams() {
-  return BLOG_POSTS.map((p) => ({ slug: p.slug }));
-}
+export const dynamic = 'force-dynamic';
 
-export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
-  const post = getPostBySlug(params.slug);
+export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
+  const post = await prisma.blogPost.findUnique({ where: { slug: params.slug } });
   if (!post) return { title: 'Post não encontrado' };
   return {
     title: post.title,
     description: post.excerpt,
-    keywords: post.keywords,
     alternates: { canonical: `/blog/${post.slug}` },
     openGraph: {
       title: post.title,
       description: post.excerpt,
       url: `/blog/${post.slug}`,
       type: 'article',
-      publishedTime: post.date,
+      publishedTime: post.publishedAt.toISOString(),
       authors: [post.author],
+      images: post.imageUrl ? [post.imageUrl] : undefined,
     },
   };
 }
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://wticorp.com.br';
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+function formatDate(d: Date) {
+  return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
-export default function BlogPostPage({ params }: { params: { slug: string } }) {
-  const post = getPostBySlug(params.slug);
-  if (!post) notFound();
+export default async function BlogPostPage({ params }: { params: { slug: string } }) {
+  const post = await prisma.blogPost.findUnique({ where: { slug: params.slug } });
+  if (!post || !post.isPublished) notFound();
 
   const articleLd = {
     '@context': 'https://schema.org',
     '@type': 'Article',
     headline: post.title,
     description: post.excerpt,
-    datePublished: post.date,
-    dateModified: post.date,
+    datePublished: post.publishedAt.toISOString(),
+    dateModified: post.updatedAt.toISOString(),
     author: { '@type': 'Organization', name: post.author },
     publisher: { '@type': 'Organization', name: 'Winner Tecnologia', logo: { '@type': 'ImageObject', url: `${SITE_URL}/logo.png` } },
     mainEntityOfPage: `${SITE_URL}/blog/${post.slug}`,
+    image: post.imageUrl || undefined,
   };
 
   const breadcrumbLd = {
@@ -85,10 +84,14 @@ export default function BlogPostPage({ params }: { params: { slug: string } }) {
           <h1 className="font-montserrat font-bold text-3xl md:text-5xl text-white mb-6 leading-tight">{post.title}</h1>
 
           <div className="flex items-center gap-6 text-sm text-gray-400 mb-12 pb-6 border-b border-white/10">
-            <span className="inline-flex items-center gap-1"><Calendar className="w-4 h-4" /> {formatDate(post.date)}</span>
-            <span className="inline-flex items-center gap-1"><Clock className="w-4 h-4" /> {post.readingTime} min de leitura</span>
+            <span className="inline-flex items-center gap-1"><Calendar className="w-4 h-4" /> {formatDate(post.publishedAt)}</span>
             <span>{post.author}</span>
           </div>
+
+          {post.imageUrl && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={post.imageUrl} alt={post.title} className="w-full rounded-xl mb-8" />
+          )}
 
           <div className="prose prose-invert prose-lg max-w-none">
             {post.content.split('\n\n').map((para, i) => (
