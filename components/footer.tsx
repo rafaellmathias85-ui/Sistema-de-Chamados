@@ -6,7 +6,9 @@ import { Shield, ArrowUp, Monitor } from 'lucide-react';
 const footerLinks = [
   { name: 'Início', href: '#inicio' },
   { name: 'Sobre', href: '#sobre' },
-  { name: 'Serviços', href: '#servicos' },
+  { name: 'Serviços', href: '/servicos' },
+  { name: 'Cases', href: '/cases' },
+  { name: 'Blog', href: '/blog' },
   { name: 'Acesso Remoto', href: '/acesso-remoto' },
   { name: 'Contato', href: '#contato' },
 ];

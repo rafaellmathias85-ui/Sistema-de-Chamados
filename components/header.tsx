@@ -8,8 +8,9 @@ import Image from 'next/image';
 const navLinks = [
   { name: 'Início', href: '#inicio', type: 'anchor' as const },
   { name: 'Sobre', href: '#sobre', type: 'anchor' as const },
-  { name: 'Serviços', href: '#servicos', type: 'anchor' as const },
-  { name: 'Diferenciais', href: '#diferenciais', type: 'anchor' as const },
+  { name: 'Serviços', href: '/servicos', type: 'link' as const },
+  { name: 'Cases', href: '/cases', type: 'link' as const },
+  { name: 'Blog', href: '/blog', type: 'link' as const },
   { name: 'Acesso Remoto', href: '/acesso-remoto', type: 'link' as const },
   { name: 'WNR-Audit', href: 'https://wnrtecnologia.com.br/wnr-audit', type: 'external' as const },
   { name: 'Contato', href: '#contato', type: 'anchor' as const },
