@@ -13,7 +13,10 @@ export async function GET(request: NextRequest) {
 
     // For staff: count tickets where they're assigned and have alertAssignee=true
     if (['ADMIN', 'SUPPORT', 'FINANCE', 'SPECIAL'].includes(session.user.role)) {
-      const [ticketAlertCount, tickets, pendingTransfers] = await Promise.all([
+      const isAdminOrSupport = ['ADMIN', 'SUPPORT'].includes(session.user.role);
+      // Tickets nao atribuidos com atividade recente do cliente (ultimas 72h) — apenas para ADMIN/SUPPORT
+      const sevenDaysAgo = new Date(Date.now() - 72 * 60 * 60 * 1000);
+      const [ticketAlertCount, tickets, pendingTransfers, unassignedTickets, reopenedTickets] = await Promise.all([
         prisma.ticket.count({
           where: {
             assigneeId: session.user.id,
@@ -50,6 +53,46 @@ export async function GET(request: NextRequest) {
           orderBy: { createdAt: 'desc' },
           take: 10,
         }),
+        // Tickets sem responsavel com atividade recente — visivel apenas para ADMIN/SUPPORT
+        isAdminOrSupport
+          ? prisma.ticket.findMany({
+              where: {
+                assigneeId: null,
+                status: { in: ['OPEN', 'IN_PROGRESS'] },
+                updatedAt: { gte: sevenDaysAgo },
+              },
+              select: {
+                id: true,
+                number: true,
+                subject: true,
+                priority: true,
+                updatedAt: true,
+                company: { select: { name: true } },
+              },
+              orderBy: { updatedAt: 'desc' },
+              take: 10,
+            })
+          : Promise.resolve([]),
+        // Tickets reabertos com flag reopenedFlag=true
+        isAdminOrSupport
+          ? prisma.ticket.findMany({
+              where: {
+                reopenedFlag: true,
+                status: { in: ['OPEN', 'IN_PROGRESS'] },
+              },
+              select: {
+                id: true,
+                number: true,
+                subject: true,
+                priority: true,
+                reopenedAt: true,
+                assignee: { select: { name: true } },
+                company: { select: { name: true } },
+              },
+              orderBy: { reopenedAt: 'desc' },
+              take: 10,
+            })
+          : Promise.resolve([]),
       ]);
 
       // Alertas RMM pendentes (não reconhecidos)
@@ -63,7 +106,12 @@ export async function GET(request: NextRequest) {
       });
       const rmmAlertCount = await prisma.rmmAlert.count({ where: { acknowledged: false } });
 
-      const totalCount = ticketAlertCount + pendingTransfers.length + rmmAlertCount;
+      const totalCount =
+        ticketAlertCount +
+        pendingTransfers.length +
+        rmmAlertCount +
+        unassignedTickets.length +
+        reopenedTickets.length;
 
       return NextResponse.json({
         count: totalCount,
@@ -71,6 +119,8 @@ export async function GET(request: NextRequest) {
         pendingTransfers,
         rmmAlerts,
         rmmAlertCount,
+        unassignedTickets,
+        reopenedTickets,
       });
     }
 

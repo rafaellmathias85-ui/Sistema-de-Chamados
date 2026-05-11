@@ -9,6 +9,7 @@ interface NotificationParams {
   subject: string;
   body: string;
   isHtml?: boolean;
+  attachments?: Array<{ filename: string; contentBase64: string; contentType?: string }>;
 }
 
 interface EmailConfigData {
@@ -166,6 +167,11 @@ async function sendEmailViaSMTP(config: EmailConfigData, params: NotificationPar
       subject: params.subject,
       html: params.isHtml !== false ? params.body : undefined,
       text: params.isHtml === false ? params.body : undefined,
+      attachments: params.attachments?.map(a => ({
+        filename: a.filename,
+        content: Buffer.from(a.contentBase64, 'base64'),
+        contentType: a.contentType || 'application/octet-stream',
+      })),
     });
 
     console.log(`Email enviado para ${params.recipientEmail}`);
@@ -256,7 +262,8 @@ async function sendEmailViaGraph(params: NotificationParams): Promise<boolean> {
       graphConfig.userEmail,
       params.recipientEmail,
       params.subject,
-      params.body
+      params.body,
+      params.attachments
     );
 
     if (success) {

@@ -296,6 +296,7 @@ async function reopenTicket(ticketId: string, reason: string): Promise<void> {
         reopenedAt: new Date(),
         reopenCount: (ticket.reopenCount || 0) + 1,
         closedAt: null,
+        alertAssignee: true, // sempre alertar responsavel na reabertura
       },
     }),
     // Registrar histórico

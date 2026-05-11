@@ -27,6 +27,8 @@ export default function TicketsLayout({
   const [notifTickets, setNotifTickets] = useState<any[]>([]);
   const [pendingTransfers, setPendingTransfers] = useState<any[]>([]);
   const [rmmAlerts, setRmmAlerts] = useState<any[]>([]);
+  const [unassignedTickets, setUnassignedTickets] = useState<any[]>([]);
+  const [reopenedTickets, setReopenedTickets] = useState<any[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   // Toast de alerta de nova interacao
   const [toasts, setToasts] = useState<Array<{ id: string; number: number; subject: string; company: string }>>([]);
@@ -74,6 +76,8 @@ export default function TicketsLayout({
         setNotifTickets(newTickets);
         setPendingTransfers(data.pendingTransfers || []);
         setRmmAlerts(data.rmmAlerts || []);
+        setUnassignedTickets(data.unassignedTickets || []);
+        setReopenedTickets(data.reopenedTickets || []);
 
         // Filtrar tickets que:
         // - ainda nao tiveram toast exibido nesta sessao
@@ -197,7 +201,7 @@ export default function TicketsLayout({
                           <span className="text-xs text-cyan-400">{notifCount} pendente(s)</span>
                         )}
                       </div>
-                      {notifTickets.length === 0 && pendingTransfers.length === 0 && rmmAlerts.length === 0 ? (
+                      {notifTickets.length === 0 && pendingTransfers.length === 0 && rmmAlerts.length === 0 && unassignedTickets.length === 0 && reopenedTickets.length === 0 ? (
                         <div className="px-4 py-8 text-center tm-text-muted text-sm">
                           Nenhuma notificação
                         </div>
@@ -248,6 +252,35 @@ export default function TicketsLayout({
                                 >Ver</button>
                               </div>
                             </div>
+                          ))}
+                          {/* Tickets reabertos */}
+                          {reopenedTickets.map((t: any) => (
+                            <button
+                              key={`reopen-${t.id}`}
+                              onClick={() => { router.push(`/tickets/${t.id}`); setNotifOpen(false); }}
+                              className="w-full px-4 py-3 text-left hover:bg-white/5 transition border-l-2 border-yellow-500"
+                            >
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="text-xs font-semibold text-yellow-400">🔄 Reaberto</span>
+                                <span className="text-[10px] tm-text-muted">#{t.number} • {t.company?.name}</span>
+                              </div>
+                              <p className="text-xs tm-text truncate">{t.subject}</p>
+                              <p className="text-[10px] tm-text-muted mt-0.5">Resp: {t.assignee?.name || 'Sem responsável'}</p>
+                            </button>
+                          ))}
+                          {/* Tickets sem responsável */}
+                          {unassignedTickets.map((t: any) => (
+                            <button
+                              key={`unassign-${t.id}`}
+                              onClick={() => { router.push(`/tickets/${t.id}`); setNotifOpen(false); }}
+                              className="w-full px-4 py-3 text-left hover:bg-white/5 transition border-l-2 border-purple-500"
+                            >
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="text-xs font-semibold text-purple-400">👤 Sem responsável</span>
+                                <span className="text-[10px] tm-text-muted">#{t.number} • {t.company?.name}</span>
+                              </div>
+                              <p className="text-xs tm-text truncate">{t.subject}</p>
+                            </button>
                           ))}
                           {/* Alertas de tickets */}
                           {notifTickets.map((t: any) => (

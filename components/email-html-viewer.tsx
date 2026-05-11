@@ -22,10 +22,10 @@ function sanitizeClient(html: string): string {
     .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript\s*:/gi, '')
     .replace(/vbscript\s*:/gi, '');
-  // Substituir imagens CID não resolvidas por placeholder informativo
+  // Remover imagens CID não resolvidas (normalmente logos de assinatura) — silencioso
   result = result.replace(
     /<img\b[^>]*\bsrc\s*=\s*["']cid:[^"']*["'][^>]*\/?>/gi,
-    '<span style="display:inline-block;padding:4px 10px;background:rgba(100,116,139,0.2);border:1px dashed rgba(148,163,184,0.4);border-radius:6px;font-size:11px;color:#94a3b8;margin:2px 0;">[Imagem do e-mail — não disponível]</span>'
+    ''
   );
   return result;
 }

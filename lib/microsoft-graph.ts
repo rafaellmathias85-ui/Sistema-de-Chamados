@@ -389,33 +389,43 @@ export async function sendEmail(
   userEmail: string,
   to: string,
   subject: string,
-  htmlBody: string
+  htmlBody: string,
+  attachments?: Array<{ filename: string; contentBase64: string; contentType?: string }>
 ): Promise<boolean> {
   try {
     const url = `https://graph.microsoft.com/v1.0/users/${userEmail}/sendMail`;
-    
+
+    const message: any = {
+      subject,
+      body: {
+        contentType: 'HTML',
+        content: htmlBody,
+      },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: to,
+          },
+        },
+      ],
+    };
+
+    if (attachments && attachments.length > 0) {
+      message.attachments = attachments.map(a => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: a.filename,
+        contentType: a.contentType || 'application/octet-stream',
+        contentBytes: a.contentBase64,
+      }));
+    }
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        message: {
-          subject,
-          body: {
-            contentType: 'HTML',
-            content: htmlBody,
-          },
-          toRecipients: [
-            {
-              emailAddress: {
-                address: to,
-              },
-            },
-          ],
-        },
-      }),
+      body: JSON.stringify({ message }),
     });
 
     return response.ok || response.status === 202;
@@ -500,6 +510,7 @@ async function reopenTicket(ticketId: string, reason: string): Promise<void> {
         reopenCount: (ticket.reopenCount || 0) + 1,
         closedAt: null,
         resolvedAt: null,
+        alertAssignee: true, // sempre alertar responsavel na reabertura
       },
     }),
     prisma.ticketHistory.create({
