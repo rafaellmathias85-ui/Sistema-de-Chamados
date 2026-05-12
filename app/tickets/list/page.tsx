@@ -23,6 +23,7 @@ import {
   PauseCircle,
   Hourglass,
   EyeOff,
+  RotateCcw,
 } from 'lucide-react';
 import ResolveTicketModal from '@/components/resolve-ticket-modal';
 import ExportTicketsModal from '@/components/export-tickets-modal';
@@ -59,6 +60,7 @@ export default function TicketListPage() {
   const [onlyMyTickets, setOnlyMyTickets] = useState(false);
   const [slaViolated, setSlaViolated] = useState(false);
   const [hideClosed, setHideClosed] = useState(false);
+  const [reopenedOnly, setReopenedOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalPages, setTotalPages] = useState(1);
@@ -134,7 +136,7 @@ export default function TicketListPage() {
   useEffect(() => {
     fetchTickets();
     fetchStatusCounts();
-  }, [page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed]);
+  }, [page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed, reopenedOnly]);
 
   // Auto-refresh a cada 1 min (para manter lista sempre atualizada)
   useEffect(() => {
@@ -144,7 +146,7 @@ export default function TicketListPage() {
       fetchStatusCounts();
     }, 60000); // 1 min
     return () => clearInterval(interval);
-  }, [autoRefresh, page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed]);
+  }, [autoRefresh, page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed, reopenedOnly]);
 
   const fetchTickets = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -160,6 +162,7 @@ export default function TicketListPage() {
       if (onlyMyTickets && session?.user?.id) params.append('onlyMine', 'true');
       if (slaViolated) params.append('slaViolated', 'true');
       if (hideClosed) params.append('hideClosed', 'true');
+      if (reopenedOnly) params.append('reopened', 'true');
 
       const res = await fetch(`/api/tickets?${params}`, { cache: 'no-store' });
       if (res.ok) {
@@ -458,6 +461,18 @@ export default function TicketListPage() {
                   <span className="text-sm tm-text flex items-center gap-1">
                     <EyeOff size={16} className="text-gray-400" />
                     Ocultar Fechados
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={reopenedOnly}
+                    onChange={(e) => { setReopenedOnly(e.target.checked); setPage(1); }}
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500 focus:ring-offset-0"
+                  />
+                  <span className="text-sm tm-text flex items-center gap-1">
+                    <RotateCcw size={16} className="text-yellow-400" />
+                    Reabertos sem resposta
                   </span>
                 </label>
               </div>

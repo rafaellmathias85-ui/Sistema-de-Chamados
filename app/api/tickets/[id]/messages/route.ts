@@ -72,6 +72,19 @@ export async function POST(
       });
     }
 
+    // Se SUPPORT/ADMIN respondeu (mensagem nao interna) e o ticket esta marcado
+    // como reaberto, limpa a flag - significa que ja foi atendido pos-reabertura.
+    if (
+      !finalIsInternal &&
+      session.user.role !== 'CLIENT' &&
+      ticket.reopenedFlag
+    ) {
+      await prisma.ticket.update({
+        where: { id: params.id },
+        data: { reopenedFlag: false },
+      });
+    }
+
     // ========================================================
     // REABERTURA AUTOMATICA: cliente respondeu chamado fechado
     // ========================================================
