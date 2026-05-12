@@ -25,7 +25,7 @@ function csvEscape(val: string | null | undefined) {
 
 function fmtDate(d: Date | string | null | undefined) {
   if (!d) return '';
-  return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(d).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 export async function GET(request: NextRequest) {

@@ -66,6 +66,7 @@ export default function RmmDashboardPage() {
   const [search, setSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline'>('all');
   const [deleting, setDeleting] = useState<string | null>(null);
   const [reactivating, setReactivating] = useState<string | null>(null);
 
@@ -147,6 +148,10 @@ export default function RmmDashboardPage() {
   };
 
   const filtered = machines.filter((m) => {
+    // Filtro de status (online/offline)
+    if (filterStatus === 'online' && m.status !== 'Ligado') return false;
+    if (filterStatus === 'offline' && m.status === 'Ligado') return false;
+
     const q = search.toLowerCase();
     return (
       m.hostname.toLowerCase().includes(q) ||
@@ -158,7 +163,7 @@ export default function RmmDashboardPage() {
 
   const formatDate = (d: string | null) => {
     if (!d) return '—';
-    return new Date(d).toLocaleString('pt-BR', {
+    return new Date(d).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo',
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
@@ -228,31 +233,45 @@ export default function RmmDashboardPage() {
         ))}
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats Cards — clicáveis para filtrar */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: 'Total Máquinas', value: stats.totalMachines, icon: Server, color: 'text-blue-400' },
-            { label: 'Online', value: stats.onlineMachines, icon: Wifi, color: 'text-green-400' },
-            { label: 'Offline', value: stats.offlineMachines, icon: WifiOff, color: 'text-red-400' },
-            { label: 'Empresas RMM', value: stats.companiesWithRmm, icon: Building2, color: 'text-purple-400' },
-          ].map((s, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className="tm-bg-card border tm-border rounded-xl p-4"
-            >
-              <div className="flex items-center gap-3">
-                <s.icon size={20} className={s.color} />
-                <div>
-                  <p className="text-2xl font-bold tm-text">{s.value}</p>
-                  <p className="text-xs tm-text-secondary">{s.label}</p>
+            { label: 'Total Máquinas', value: stats.totalMachines, icon: Server, color: 'text-blue-400', border: 'border-blue-500', filterVal: 'all' as const },
+            { label: 'Online', value: stats.onlineMachines, icon: Wifi, color: 'text-green-400', border: 'border-green-500', filterVal: 'online' as const },
+            { label: 'Offline', value: stats.offlineMachines, icon: WifiOff, color: 'text-red-400', border: 'border-red-500', filterVal: 'offline' as const },
+            { label: 'Empresas RMM', value: stats.companiesWithRmm, icon: Building2, color: 'text-purple-400', border: 'border-purple-500', filterVal: null },
+          ].map((s, i) => {
+            const isActive = s.filterVal !== null && filterStatus === s.filterVal;
+            const isClickable = s.filterVal !== null;
+            return (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+                onClick={() => {
+                  if (s.filterVal !== null) {
+                    setFilterStatus(filterStatus === s.filterVal ? 'all' : s.filterVal);
+                  }
+                }}
+                className={`tm-bg-card border rounded-xl p-4 transition-all ${
+                  isClickable ? 'cursor-pointer hover:scale-[1.02]' : ''
+                } ${isActive ? `${s.border} border-2 ring-1 ring-opacity-30 ${s.border.replace('border-', 'ring-')}` : 'tm-border'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <s.icon size={20} className={s.color} />
+                  <div>
+                    <p className="text-2xl font-bold tm-text">{s.value}</p>
+                    <p className="text-xs tm-text-secondary">{s.label}</p>
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          ))}
+                {isActive && (
+                  <p className="text-[10px] mt-2 text-center tm-text-muted">Filtro ativo — clique para limpar</p>
+                )}
+              </motion.div>
+            );
+          })}
         </div>
       )}
 

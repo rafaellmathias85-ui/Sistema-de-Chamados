@@ -217,9 +217,9 @@ export function generateEmailHeader(params: {
     ? `${params.fromName} &lt;${params.from || ''}&gt;`
     : params.from || '';
   const dateStr = params.date
-    ? params.date.toLocaleDateString('pt-BR') +
+    ? params.date.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) +
       ' ' +
-      params.date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      params.date.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
     : '';
   return `<div class="email-meta-header" style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;line-height:1.6;color:#cbd5e1;font-family:system-ui,-apple-system,sans-serif;">
     <div style="margin-bottom:6px;color:#60a5fa;font-weight:600;text-transform:uppercase;letter-spacing:0.02em;font-size:11px;">Detalhes da mensagem</div>

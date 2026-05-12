@@ -89,7 +89,7 @@ export async function PATCH(request: NextRequest) {
             `**Mensagem:** ${alert.message}`,
             alert.thresholdValue != null ? `**Limite:** ${alert.thresholdValue}%` : '',
             alert.actualValue != null ? `**Valor Atual:** ${alert.actualValue}%` : '',
-            `**Data do Alerta:** ${new Date(alert.createdAt).toLocaleString('pt-BR')}`,
+            `**Data do Alerta:** ${new Date(alert.createdAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`,
           ].filter(Boolean).join('\\n'),
           status: 'OPEN',
           priority: (priorityMap[alert.severity] || 'MEDIUM') as any,

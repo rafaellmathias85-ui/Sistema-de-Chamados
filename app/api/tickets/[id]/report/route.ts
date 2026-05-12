@@ -24,12 +24,12 @@ const statusColors: Record<string, string> = {
 
 function fmtDate(d: Date | string | null): string {
   if (!d) return '\u2014';
-  return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(d).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function fmtDateShort(d: Date | string | null): string {
   if (!d) return '\u2014';
-  return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return new Date(d).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 function escapeHtml(str: string): string {
@@ -175,8 +175,8 @@ function buildReportHtml(ticket: any, messages: any[], tenant: any) {
   const resStart = ticket.serviceStartedAt || ticket.createdAt;
   const resEnd = ticket.serviceEndedAt || ticket.resolvedAt || ticket.closedAt;
   const resTime = calcResolutionTime(resStart, resEnd);
-  const genDate = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
-  const genTime = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const genDate = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: 'long', year: 'numeric' });
+  const genTime = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
 
   // Messages HTML
   const msgHtml = messages.map((m: any, idx: number) => {

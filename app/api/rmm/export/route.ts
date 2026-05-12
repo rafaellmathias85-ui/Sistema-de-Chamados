@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
         return fields.map(f => {
           let val = '';
           if (f === 'company') val = m.company?.name || '';
-          else if (f === 'lastCheckin') val = m.lastCheckin ? new Date(m.lastCheckin).toLocaleString('pt-BR') : '';
+          else if (f === 'lastCheckin') val = m.lastCheckin ? new Date(m.lastCheckin).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '';
           else val = String((m as any)[f] || '');
           return `"${val.replace(/"/g, '""')}"`;
         }).join(',');
@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
       const row: Record<string, string> = {};
       fields.forEach(f => {
         if (f === 'company') row[fieldLabels[f]] = m.company?.name || '';
-        else if (f === 'lastCheckin') row[fieldLabels[f]] = m.lastCheckin ? new Date(m.lastCheckin).toLocaleString('pt-BR') : '';
+        else if (f === 'lastCheckin') row[fieldLabels[f]] = m.lastCheckin ? new Date(m.lastCheckin).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '';
         else row[fieldLabels[f]] = String((m as any)[f] || '');
       });
       return row;

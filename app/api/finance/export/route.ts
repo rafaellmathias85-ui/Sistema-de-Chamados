@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     });
 
     const formatCurrency = (v: any) => v ? Number(v).toFixed(2).replace('.', ',') : '';
-    const formatDate = (d: any) => d ? new Date(d).toLocaleDateString('pt-BR') : '';
+    const formatDate = (d: any) => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '';
 
     if (format === 'csv') {
       const header = 'Número;Empresa;Tipo;Assunto;Status;Criado em;Valor (R$);Faturado;Data Faturamento;Observações';

@@ -37,7 +37,7 @@ export async function PATCH(
       where: { id: taskId },
       data: {
         status: 'CANCELLED',
-        result: `Cancelado por ${session.user.name || 'Admin'} em ${new Date().toLocaleString('pt-BR')}`,
+        result: `Cancelado por ${session.user.name || 'Admin'} em ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`,
         executedAt: new Date(),
       },
     });

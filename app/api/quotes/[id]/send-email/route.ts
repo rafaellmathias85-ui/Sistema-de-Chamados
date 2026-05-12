@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/session';
 import { sendNotificationEmail } from '@/lib/notifications';
-import { buildQuoteHtml, buildQuoteNumber } from '@/lib/quote-template';
+import { buildQuoteEmailHtml, buildQuoteNumber } from '@/lib/quote-template';
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const session = await getSession();
@@ -35,8 +35,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     tenant = await prisma.tenant.findFirst({ select: { name: true, primaryColor: true, logoUrl: true } });
   } catch {}
 
-  // Corpo do e-mail = mesmo HTML do preview (sem anexo)
-  const htmlBody = buildQuoteHtml(quote, tenant);
+  // Corpo do e-mail = versão email-safe (table layout, inline styles, sem base64)
+  const htmlBody = buildQuoteEmailHtml(quote, tenant);
   const quoteNum = buildQuoteNumber(quote);
   const subject = `Orçamento #${quoteNum} — ${quote.title}`;
 

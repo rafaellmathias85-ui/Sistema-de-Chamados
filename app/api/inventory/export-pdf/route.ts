@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
 </style></head><body>
   <div class="header">
     <h1>Inventário de Máquinas</h1>
-    <p>Relatório gerado em ${new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+    <p>Relatório gerado em ${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
   </div>
   <div class="content">
     <div class="stats">

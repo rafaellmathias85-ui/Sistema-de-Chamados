@@ -32,7 +32,7 @@ function escapeXml(str: string): string {
 
 function formatDate(date: Date | null): string {
   if (!date) return '';
-  return new Date(date).toLocaleString('pt-BR');
+  return new Date(date).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
 // GET - Exportar relatório em CSV, XLS ou PDF
@@ -350,7 +350,7 @@ function exportXLS(headers: string[], data: (string | number | null)[][], title:
       </Row>
       <Row>
         <Cell ss:MergeAcross="${headers.length - 1}" ss:StyleID="date">
-          <Data ss:Type="String">Gerado em: ${new Date().toLocaleString('pt-BR')}${periodStr}</Data>
+          <Data ss:Type="String">Gerado em: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}${periodStr}</Data>
         </Cell>
       </Row>
       <Row></Row>
@@ -469,7 +469,7 @@ async function exportPDF(headers: string[], data: (string | number | null)[][], 
       <strong style="color: #3B82F6; font-size: 16px;">Winner Tecnologia</strong>
     </div>
     <h1>${title}</h1>
-    <p class="date">Gerado em: ${new Date().toLocaleString('pt-BR')}${periodStr}</p>
+    <p class="date">Gerado em: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}${periodStr}</p>
   </div>
 
   <div class="summary">

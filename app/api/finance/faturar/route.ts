@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Format date as DD/MM/YYYY
-    const dateStr = now.toLocaleDateString('pt-BR');
+    const dateStr = now.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
     // Email subject: {CLIENT} [{TICKET#}] [{DATE}]
     const emailSubject = `${ticket.company.name} [#${ticket.number}] [${dateStr}]`;
