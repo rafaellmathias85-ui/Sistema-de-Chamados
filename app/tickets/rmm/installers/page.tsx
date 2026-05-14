@@ -70,7 +70,7 @@ export default function InstallersPage() {
   const isAdmin = ['ADMIN','SUPPORT'].includes(session?.user?.role || '');
 
   useEffect(() => {
-    fetch('/api/companies').then((r) => r.json()).then((data) => {
+    fetch('/api/companies?limit=1000').then((r) => r.json()).then((data) => {
       setCompanies(Array.isArray(data) ? data : data.companies || []);
     });
   }, []);

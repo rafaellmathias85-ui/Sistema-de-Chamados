@@ -7,7 +7,7 @@ import Link from 'next/link';
 import {
   Package, ChevronLeft, RefreshCw, Loader2,
   Plus, Trash2, Check, AlertTriangle, Star,
-  Upload, Tag,
+  Upload, Tag, Send,
 } from 'lucide-react';
 
 interface AgentVersion {
@@ -31,6 +31,8 @@ export default function VersionsPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [pushResult, setPushResult] = useState<string | null>(null);
   const [form, setForm] = useState({
     version: '', agentType: 'msi', channel: 'stable',
     releaseNotes: '', downloadUrl: '', fileHashSha256: '',
@@ -76,6 +78,29 @@ export default function VersionsPage() {
     await loadData();
   };
 
+  const handlePushUpdate = async () => {
+    if (!confirm('Enviar comando de atualização para TODAS as máquinas online agora?')) return;
+    setPushing(true);
+    setPushResult(null);
+    try {
+      const res = await fetch('/api/rmm/agent/push-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allOnline: true }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPushResult(`✅ ${data.tasksCreated} tarefas criadas para ${data.machinesFound} máquinas: ${data.machines?.join(', ')}`);
+      } else {
+        setPushResult(`❌ ${data.error}`);
+      }
+    } catch {
+      setPushResult('❌ Erro ao enviar atualização');
+    } finally {
+      setPushing(false);
+    }
+  };
+
   const formatBytes = (b: string) => {
     const n = parseInt(b);
     if (isNaN(n)) return b;
@@ -96,7 +121,12 @@ export default function VersionsPage() {
           </h1>
           <p className="tm-text-secondary mt-1">Gerenciar versões, canais e distribuição de atualizações</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={handlePushUpdate} disabled={pushing}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm flex items-center gap-2 disabled:opacity-50">
+            {pushing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            Enviar Atualização
+          </button>
           <button onClick={() => setShowForm(!showForm)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm flex items-center gap-2">
             <Plus size={14} /> Publicar Versão
           </button>
@@ -105,6 +135,12 @@ export default function VersionsPage() {
           </Link>
         </div>
       </div>
+
+      {pushResult && (
+        <div className={`p-3 rounded-lg text-sm ${pushResult.startsWith('✅') ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
+          {pushResult}
+        </div>
+      )}
 
       {showForm && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="tm-bg-card border tm-border rounded-xl p-5 space-y-4">

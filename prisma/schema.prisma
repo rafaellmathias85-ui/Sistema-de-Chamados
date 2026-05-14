@@ -412,6 +412,11 @@ model RmmMachine {
   relayConfig           RelayConfig?
   relayDeploymentJobs   RelayDeploymentJob[]
   
+  // RMM v2 - Disk Health relations
+  diskInventoryItems    DiskInventory[]
+  diskHealthMetrics     DiskHealthMetric[]
+  diskHealthAlerts      DiskHealthAlert[]
+  
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   
@@ -1736,4 +1741,114 @@ model WebFilterLog {
   @@index([machineId, eventAt(sort: Desc)])
   @@index([domain, action, eventAt(sort: Desc)])
   @@index([action, eventAt(sort: Desc)])
+}
+
+
+// ============================================
+// RMM v2 - Disk Health Module (Phase 7)
+// ============================================
+
+model DiskInventory {
+  id            String    @id @default(cuid())
+  machineId     String
+  machine       RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  
+  // Identificação do disco
+  diskNumber    Int       // Disk number (0, 1, 2...)
+  model         String?   // Modelo do disco (ex: Samsung SSD 970 EVO)
+  serialNumber  String?   // Serial number
+  firmwareRev   String?   // Firmware revision
+  mediaType     String    @default("Unknown") // SSD, HDD, NVMe, Unknown
+  busType       String?   // SATA, NVMe, USB, SCSI
+  
+  // Capacidade e partições
+  sizeBytes     BigInt?   // Tamanho total em bytes
+  partitionCount Int?     // Número de partições
+  partitionsJson String?  @db.Text // JSON [{letter, label, sizeBytes, freeBytes, fileSystem}]
+  
+  // Status SMART
+  smartStatus   String    @default("Unknown") // Healthy, Warning, Critical, Failed, Unknown
+  smartEnabled  Boolean?  // Se SMART está ativo
+  
+  // Timestamps
+  lastScanAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relações
+  healthMetrics DiskHealthMetric[]
+  healthAlerts  DiskHealthAlert[]
+  
+  @@unique([machineId, diskNumber])
+  @@index([machineId])
+  @@index([smartStatus])
+  @@index([mediaType])
+}
+
+model DiskHealthMetric {
+  id              String    @id @default(cuid())
+  machineId       String
+  machine         RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  diskInventoryId String
+  diskInventory   DiskInventory @relation(fields: [diskInventoryId], references: [id], onDelete: Cascade)
+  
+  // Métricas SMART
+  temperature     Int?      // Celsius
+  powerOnHours    Int?      // Horas ligado
+  powerCycleCount Int?      // Contagem de ciclos on/off
+  reallocatedSectors Int?   // Setores realocados
+  pendingSectors  Int?      // Setores pendentes de realocação
+  uncorrectableErrors Int?  // Erros não corrigíveis
+  wearLeveling    Int?      // % desgaste (SSD) — 0=novo, 100=esgotado
+  
+  // Métricas de I/O
+  readErrorRate   Int?      // Taxa de erros de leitura
+  writeErrorRate  Int?      // Taxa de erros de escrita
+  throughputMbps  Float?    // MB/s medido
+  
+  // SMART raw (completo)
+  smartRawJson    String?   @db.Text // JSON completo dos atributos SMART
+  
+  // Status computado
+  healthScore     Int?      // Score 0-100 (calculado pelo agente)
+  
+  collectedAt     DateTime  @default(now())
+  
+  @@index([diskInventoryId, collectedAt(sort: Desc)])
+  @@index([machineId, collectedAt(sort: Desc)])
+  @@index([healthScore])
+}
+
+model DiskHealthAlert {
+  id              String    @id @default(cuid())
+  machineId       String
+  machine         RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  diskInventoryId String
+  diskInventory   DiskInventory @relation(fields: [diskInventoryId], references: [id], onDelete: Cascade)
+  
+  // Classificação do alerta
+  severity        String    // critical, warning, info
+  alertType       String    // temperature_high, smart_failing, reallocated_sectors, wear_critical, disk_full, io_errors
+  title           String    // Ex: "Temperatura acima de 60°C"
+  description     String?   @db.Text // Detalhes do alerta
+  
+  // Valores de contexto
+  metricName      String?   // Nome da métrica que gerou o alerta
+  metricValue     String?   // Valor atual
+  thresholdValue  String?   // Limite configurado
+  
+  // Estado do alerta
+  status          String    @default("active") // active, acknowledged, resolved
+  acknowledgedBy  String?   // userId que fez acknowledge
+  acknowledgedAt  DateTime?
+  resolvedBy      String?   // userId que resolveu
+  resolvedAt      DateTime?
+  resolution      String?   @db.Text // Nota de resolução
+  
+  createdAt       DateTime  @default(now())
+  
+  @@index([machineId, status, createdAt(sort: Desc)])
+  @@index([severity, status])
+  @@index([diskInventoryId])
+  @@index([alertType, status])
 }

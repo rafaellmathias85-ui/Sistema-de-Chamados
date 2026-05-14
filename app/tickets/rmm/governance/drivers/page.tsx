@@ -8,6 +8,7 @@ import {
   HardDrive, ChevronLeft, RefreshCw, Search, Loader2,
   AlertTriangle, Check, Clock, Filter,
 } from 'lucide-react';
+import MachineFilter from '@/components/rmm/machine-filter';
 
 interface DriverRecord {
   id: string;
@@ -27,18 +28,21 @@ export default function DriversPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterUpdate, setFilterUpdate] = useState<'all' | 'needs_update' | 'ok'>('all');
+  const [filterMachine, setFilterMachine] = useState('');
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/rmm/governance/drivers?limit=500');
+      const params = new URLSearchParams({ limit: '500' });
+      if (filterMachine) params.set('machineId', filterMachine);
+      const res = await fetch(`/api/rmm/governance/drivers?${params}`);
       if (res.ok) setDrivers(await res.json());
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterMachine]);
 
   useEffect(() => { if (session?.user) loadData(); }, [session, loadData]);
 
@@ -78,6 +82,9 @@ export default function DriversPage() {
           </Link>
         </div>
       </div>
+
+      {/* Machine Filter */}
+      <MachineFilter value={filterMachine} onChange={setFilterMachine} />
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">

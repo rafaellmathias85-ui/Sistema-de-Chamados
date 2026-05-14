@@ -8,6 +8,7 @@ import {
   Usb, ChevronLeft, RefreshCw, Search, Loader2,
   Shield, Plus, Trash2, Check, X, AlertTriangle,
 } from 'lucide-react';
+import MachineFilter from '@/components/rmm/machine-filter';
 
 interface UsbEvent {
   id: string;
@@ -44,11 +45,14 @@ export default function UsbPage() {
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ name: '', action: 'block', deviceType: '', vendorId: '', productId: '', serialNumber: '', appliesToAll: true });
   const [saving, setSaving] = useState(false);
+  const [filterMachine, setFilterMachine] = useState('');
 
   const loadEvents = useCallback(async () => {
-    const res = await fetch('/api/rmm/governance/usb-events?limit=200');
+    const params = new URLSearchParams({ limit: '200' });
+    if (filterMachine) params.set('machineId', filterMachine);
+    const res = await fetch(`/api/rmm/governance/usb-events?${params}`);
     if (res.ok) setEvents(await res.json());
-  }, []);
+  }, [filterMachine]);
 
   const loadPolicies = useCallback(async () => {
     const res = await fetch('/api/rmm/governance/policies/usb');
@@ -131,6 +135,9 @@ export default function UsbPage() {
           </button>
         ))}
       </div>
+
+      {/* Machine Filter */}
+      <MachineFilter value={filterMachine} onChange={setFilterMachine} />
 
       {tab === 'events' && (
         <>

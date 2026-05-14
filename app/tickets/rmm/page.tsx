@@ -188,13 +188,21 @@ export default function RmmDashboardPage() {
           </h1>
           <p className="tm-text-secondary mt-1">Gerencie máquinas e execute comandos remotamente</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => { setLoading(true); fetchData(); }}
             className="px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text hover:bg-white/10 transition flex items-center gap-2 text-sm"
           >
             <RefreshCw size={16} /> Atualizar
           </button>
+          {isAdmin && (
+            <Link
+              href="/tickets/rmm/export"
+              className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition flex items-center gap-2 text-sm font-medium"
+            >
+              <FileSpreadsheet size={16} /> Exportar
+            </Link>
+          )}
           {isAdmin && (
             <Link
               href="/tickets/rmm/agent"
@@ -225,7 +233,6 @@ export default function RmmDashboardPage() {
           { href: '/tickets/rmm/scripts', icon: FileCode2, label: 'Scripts Remotos', color: 'text-cyan-400' },
           { href: '/tickets/rmm/policies', icon: ShieldAlert, label: 'Políticas de Alerta', color: 'text-yellow-400' },
           { href: '/tickets/rmm/alerts', icon: AlertTriangle, label: 'Alertas', color: 'text-red-400' },
-          { href: '/tickets/rmm/export', icon: FileSpreadsheet, label: 'Exportar', color: 'text-green-400' },
         ].map(nav => (
           <Link key={nav.href} href={nav.href} className="flex items-center gap-2 px-4 py-2.5 tm-bg-card border tm-border rounded-lg hover:bg-white/10 transition-colors text-sm">
             <nav.icon size={16} className={nav.color} />

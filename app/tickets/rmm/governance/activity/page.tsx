@@ -8,6 +8,7 @@ import {
   Activity, ChevronLeft, RefreshCw, Search, Loader2,
   Monitor, Clock, Pause, Play, Filter,
 } from 'lucide-react';
+import MachineFilter from '@/components/rmm/machine-filter';
 
 interface ActivitySession {
   id: string;
@@ -29,11 +30,13 @@ export default function ActivityPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterIdle, setFilterIdle] = useState<'all' | 'active' | 'idle'>('all');
+  const [filterMachine, setFilterMachine] = useState('');
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ limit: '200' });
+      if (filterMachine) params.set('machineId', filterMachine);
       const res = await fetch(`/api/rmm/governance/activity?${params}`);
       if (res.ok) setSessions(await res.json());
     } catch (e) {
@@ -41,7 +44,7 @@ export default function ActivityPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterMachine]);
 
   useEffect(() => { if (session?.user) loadData(); }, [session, loadData]);
 
@@ -80,6 +83,9 @@ export default function ActivityPage() {
           </Link>
         </div>
       </div>
+
+      {/* Machine Filter */}
+      <MachineFilter value={filterMachine} onChange={setFilterMachine} />
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">

@@ -8,6 +8,7 @@ import {
   Globe, ChevronLeft, RefreshCw, Search, Loader2,
   Shield, Plus, Trash2, Check, X, AlertTriangle, Tag, Link2,
 } from 'lucide-react';
+import MachineFilter from '@/components/rmm/machine-filter';
 
 interface WebLog {
   id: string;
@@ -54,11 +55,14 @@ export default function WebPage() {
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [formType, setFormType] = useState<'policy' | 'category'>('policy');
+  const [filterMachine, setFilterMachine] = useState('');
 
   const loadLogs = useCallback(async () => {
-    const res = await fetch('/api/rmm/webfilter/logs?limit=200');
+    const params = new URLSearchParams({ limit: '200' });
+    if (filterMachine) params.set('machineId', filterMachine);
+    const res = await fetch(`/api/rmm/webfilter/logs?${params}`);
     if (res.ok) setLogs(await res.json());
-  }, []);
+  }, [filterMachine]);
   const loadPolicies = useCallback(async () => {
     const res = await fetch('/api/rmm/webfilter/policies');
     if (res.ok) setPolicies(await res.json());
@@ -145,6 +149,9 @@ export default function WebPage() {
           </button>
         ))}
       </div>
+
+      {/* Machine Filter */}
+      <MachineFilter value={filterMachine} onChange={setFilterMachine} />
 
       {/* Logs Tab */}
       {tab === 'logs' && (

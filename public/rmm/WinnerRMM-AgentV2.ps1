@@ -15,6 +15,7 @@ $UPDATE_CHANNEL = "stable"     # stable, beta, canary
 $CHECKIN_INTERVAL = 60         # segundos entre check-ins
 $GOVERNANCE_INTERVAL = 300     # segundos entre coletas governance (5min)
 $DRIVER_SCAN_INTERVAL = 86400  # segundos entre scans de drivers (24h)
+$DISK_HEALTH_INTERVAL = 3600   # segundos entre coletas disk health (1h)
 # ========================================================
 
 $InstallDir = "C:\ProgramData\WinnerRMM"
@@ -50,7 +51,8 @@ function Update-Modules {
         "WinnerRMM-WebFilter.psm1",
         "WinnerRMM-Relay.psm1",
         "WinnerRMM-Update.psm1",
-        "WinnerRMM-PolicyEngine.psm1"
+        "WinnerRMM-PolicyEngine.psm1",
+        "WinnerRMM-DiskHealth.psm1"
     )
     
     foreach ($mod in $moduleFiles) {
@@ -104,6 +106,7 @@ Import-AllModules
 
 $lastGovernanceRun = (Get-Date).AddSeconds(-$GOVERNANCE_INTERVAL)
 $lastDriverScan = (Get-Date).AddSeconds(-$DRIVER_SCAN_INTERVAL)
+$lastDiskHealthScan = (Get-Date).AddSeconds(-$DISK_HEALTH_INTERVAL)
 $lastUpdateCheck = (Get-Date).AddHours(-1)
 $machineId = Get-StoredMachineId
 
@@ -180,10 +183,10 @@ while ($true) {
             
             # Web Activity + Web Filter logs
             if (Get-Command Send-WebActivity -ErrorAction SilentlyContinue) {
-                Send-WebActivity -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                Send-WebActivity -ApiUrl $API_URL -Token $COMPANY_TOKEN -Hostname $hostname
             }
             if (Get-Command Send-WebFilterLogs -ErrorAction SilentlyContinue) {
-                Send-WebFilterLogs -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                Send-WebFilterLogs -ApiUrl $API_URL -Token $COMPANY_TOKEN -Hostname $hostname
             }
             
             # Enforce politicas
@@ -204,6 +207,15 @@ while ($true) {
                 Send-DriverInventory -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
             }
             $lastDriverScan = Get-Date
+        }
+        
+        # ====== DISK HEALTH (a cada $DISK_HEALTH_INTERVAL) ======
+        if ($machineId -and ((Get-Date) - $lastDiskHealthScan).TotalSeconds -ge $DISK_HEALTH_INTERVAL) {
+            if (Get-Command Send-DiskHealth -ErrorAction SilentlyContinue) {
+                Write-Log "[Governance] Running disk health scan..."
+                Send-DiskHealth -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
+            }
+            $lastDiskHealthScan = Get-Date
         }
         
         # ====== UPDATE CHECK (a cada 1 hora) ======

@@ -7,7 +7,7 @@ import Link from 'next/link';
 import {
   Shield, Activity, Usb, Globe, HardDrive, Radio,
   Package, ClipboardList, ChevronRight, Loader2,
-  Monitor, AlertTriangle, Eye, Users,
+  Monitor, AlertTriangle, Eye, Users, Database,
 } from 'lucide-react';
 
 interface GovStats {
@@ -74,6 +74,7 @@ export default function GovernanceDashboard() {
     { href: '/tickets/rmm/governance/usb', icon: Usb, label: 'Controle USB', desc: 'Eventos de dispositivos USB e políticas de bloqueio', color: 'text-orange-400', border: 'border-orange-500/30', count: stats?.usbEvents },
     { href: '/tickets/rmm/governance/web', icon: Globe, label: 'Web Filter', desc: 'Navegação web, categorias bloqueadas e logs de acesso', color: 'text-blue-400', border: 'border-blue-500/30', count: stats?.webActivities },
     { href: '/tickets/rmm/governance/drivers', icon: HardDrive, label: 'Inventário de Drivers', desc: 'Drivers instalados, atualizações disponíveis', color: 'text-purple-400', border: 'border-purple-500/30', count: stats?.drivers },
+    { href: '/tickets/rmm/governance/disks', icon: Database, label: 'Saúde dos Discos', desc: 'SMART, temperatura, desgaste, alertas de disco', color: 'text-teal-400', border: 'border-teal-500/30' },
     { href: '/tickets/rmm/governance/relay', icon: Radio, label: 'Relay & Discovery', desc: 'Descoberta de máquinas, deploy remoto via relay', color: 'text-cyan-400', border: 'border-cyan-500/30', count: stats?.relayDiscovered },
     { href: '/tickets/rmm/governance/versions', icon: Package, label: 'Versões do Agente', desc: 'Gerenciar versões, canais de atualização, deploy', color: 'text-yellow-400', border: 'border-yellow-500/30', count: stats?.agentVersions },
     { href: '/tickets/rmm/governance/audit', icon: ClipboardList, label: 'Audit Log', desc: 'Log completo de ações de governance', color: 'text-red-400', border: 'border-red-500/30', count: stats?.auditLogs },
