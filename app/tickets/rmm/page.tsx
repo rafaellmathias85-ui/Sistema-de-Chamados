@@ -217,7 +217,8 @@ export default function RmmDashboardPage() {
       {/* Quick Nav */}
       <div className="flex flex-wrap gap-2">
         {[
-          { href: '/tickets/rmm/security', icon: Shield, label: 'Segurança (SIEM)', color: 'text-red-400' },
+          { href: '/tickets/rmm/governance', icon: Shield, label: 'Governance', color: 'text-emerald-400' },
+          { href: '/tickets/rmm/security', icon: ShieldAlert, label: 'Segurança (SIEM)', color: 'text-red-400' },
           { href: '/tickets/rmm/network', icon: Network, label: 'Rede (SNMP)', color: 'text-cyan-400' },
           { href: '/tickets/rmm/playbooks', icon: Zap, label: 'Playbooks', color: 'text-yellow-400' },
           { href: '/tickets/rmm/ai-chat', icon: Bot, label: 'Assistente IA', color: 'text-purple-400' },

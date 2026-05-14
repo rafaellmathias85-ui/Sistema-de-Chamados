@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX Toolset v3.x - Installer do Agente RMM Winner Tecnologia
+  Build: candle Product.wxs && light -ext WixUtilExtension Product.wixobj -o WinnerRMM-Agent.msi
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+
+  <Product Id="*"
+           Name="Winner RMM Agent"
+           Language="1046"
+           Version="2.0.0.0"
+           Manufacturer="Winner Tecnologia"
+           UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="Agente de Monitoramento e Gerenciamento Remoto"
+             Comments="Winner Tecnologia - RMM Agent v2.0" />
+
+    <MajorUpgrade DowngradeErrorMessage="Uma versao mais recente ja esta instalada." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Propriedades customizaveis na instalacao silenciosa -->
+    <Property Id="API_URL" Value="https://www.wticorp.com.br" />
+    <Property Id="COMPANY_TOKEN" Value="" />
+    <Property Id="UPDATE_CHANNEL" Value="stable" />
+
+    <!-- Estrutura de diretorios -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="INSTALLFOLDER" Name="WinnerRMM">
+          <Directory Id="ModulesFolder" Name="modules" />
+          <Directory Id="LogsFolder" Name="logs" />
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <!-- Componentes do Agente -->
+    <ComponentGroup Id="AgentFiles" Directory="INSTALLFOLDER">
+      <Component Id="MainAgent" Guid="11111111-2222-3333-4444-555555555501">
+        <File Id="AgentScript" Source="WinnerRMM-AgentV2.ps1" KeyPath="yes" />
+      </Component>
+      <Component Id="ConfigFile" Guid="11111111-2222-3333-4444-555555555502">
+        <File Id="Config" Source="config.json" KeyPath="yes" />
+      </Component>
+      <Component Id="ServiceWrapper" Guid="11111111-2222-3333-4444-555555555503">
+        <File Id="ServiceExe" Source="WinnerRMM-Service.exe" KeyPath="yes" />
+        <!-- Servico Windows -->
+        <ServiceInstall Id="WinnerRMMService"
+                        Type="ownProcess"
+                        Name="WinnerRMM"
+                        DisplayName="Winner RMM Agent"
+                        Description="Agente de monitoramento e gerenciamento remoto - Winner Tecnologia"
+                        Start="auto"
+                        Account="LocalSystem"
+                        ErrorControl="normal">
+          <ServiceDependency Id="Tcpip" />
+          <ServiceDependency Id="Dnscache" />
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="60"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Id="StartService"
+                        Name="WinnerRMM"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Modulos PowerShell -->
+    <ComponentGroup Id="ModuleFiles" Directory="ModulesFolder">
+      <Component Id="ModGovernance" Guid="11111111-2222-3333-4444-555555555510">
+        <File Id="Governance" Source="modules\WinnerRMM-Governance.psm1" KeyPath="yes" />
+      </Component>
+      <Component Id="ModWebFilter" Guid="11111111-2222-3333-4444-555555555511">
+        <File Id="WebFilter" Source="modules\WinnerRMM-WebFilter.psm1" KeyPath="yes" />
+      </Component>
+      <Component Id="ModRelay" Guid="11111111-2222-3333-4444-555555555512">
+        <File Id="Relay" Source="modules\WinnerRMM-Relay.psm1" KeyPath="yes" />
+      </Component>
+      <Component Id="ModUpdate" Guid="11111111-2222-3333-4444-555555555513">
+        <File Id="Update" Source="modules\WinnerRMM-Update.psm1" KeyPath="yes" />
+      </Component>
+      <Component Id="ModPolicyEngine" Guid="11111111-2222-3333-4444-555555555514">
+        <File Id="PolicyEngine" Source="modules\WinnerRMM-PolicyEngine.psm1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Registro Windows -->
+    <ComponentGroup Id="RegistryEntries" Directory="INSTALLFOLDER">
+      <Component Id="RegEntries" Guid="11111111-2222-3333-4444-555555555520">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\WinnerRMM">
+          <RegistryValue Type="string" Name="InstallDir" Value="[INSTALLFOLDER]" />
+          <RegistryValue Type="string" Name="Version" Value="2.0.0" />
+          <RegistryValue Type="string" Name="ApiUrl" Value="[API_URL]" />
+          <RegistryValue Type="string" Name="CompanyToken" Value="[COMPANY_TOKEN]" />
+          <RegistryValue Type="string" Name="UpdateChannel" Value="[UPDATE_CHANNEL]" />
+          <RegistryValue Type="string" Name="AgentType" Value="msi" />
+        </RegistryKey>
+        <RegistryValue Root="HKLM" Key="SOFTWARE\WinnerRMM" Type="string" Name="RegKey" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Custom Actions para configuracao pos-instalacao -->
+    <CustomAction Id="WriteConfig"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand='cmd.exe /c echo {"apiUrl":"[API_URL]","companyToken":"[COMPANY_TOKEN]","updateChannel":"[UPDATE_CHANNEL]","agentType":"msi","version":"2.0.0"} > "[INSTALLFOLDER]config.json"'
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="WriteConfig" Before="InstallFinalize">NOT Installed</Custom>
+    </InstallExecuteSequence>
+
+    <!-- Feature principal -->
+    <Feature Id="Complete" Title="Winner RMM Agent" Level="1">
+      <ComponentGroupRef Id="AgentFiles" />
+      <ComponentGroupRef Id="ModuleFiles" />
+      <ComponentGroupRef Id="RegistryEntries" />
+    </Feature>
+
+    <!-- UI minima (silencioso por padrao) -->
+    <UIRef Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+
+  </Product>
+</Wix>
