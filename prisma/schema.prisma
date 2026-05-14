@@ -52,6 +52,14 @@ model Tenant {
   whatsappLogs WhatsAppLog[]
   snmpDevices  SnmpDevice[]
   rmmInstallers RmmInstaller[]
+  
+  // RMM v2 - Governance relations
+  agentVersions         AgentVersion[]
+  usbPolicies           UsbPolicy[]
+  productivityPolicies  ProductivityPolicy[]
+  webFilterCategories   WebFilterCategory[]
+  webFilterPolicies     WebFilterPolicy[]
+  relayCredentials      RelayCredential[]
 }
 
 enum Role {
@@ -280,6 +288,14 @@ model Company {
   rmmInstallers RmmInstaller[]
   quotes      Quote[]
   
+  // RMM v2 - Governance relations
+  usbPolicies           UsbPolicy[]
+  productivityPolicies  ProductivityPolicy[]
+  webFilterPolicies     WebFilterPolicy[]
+  relayCredentials      RelayCredential[]
+  relayConfigs          RelayConfig[]
+  relayDiscoveredMachines RelayDiscoveredMachine[]
+  
   @@index([tenantId])
   @@index([name])
 }
@@ -364,6 +380,12 @@ model RmmMachine {
   memorySlotsUsed    Int?    // Slots de memoria preenchidos
   memoryModulesJson  String? // JSON [{capacity, speed, manufacturer, slot}]
   
+  // RMM v2 - Agent Version Control
+  agentVersion   String?   // Versão atual do agente instalado (ex: "2.0.1")
+  agentType      String?   @default("ps1") // Tipo do agente: ps1, msi
+  lastUpdateAt   DateTime? // Último update realizado
+  updateChannel  String?   @default("stable") // Canal de atualização: stable, beta, canary
+  
   companyId   String
   company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
@@ -379,6 +401,19 @@ model RmmMachine {
   securityAlerts     SecurityAlert[]
   playbookExecutions PlaybookExecution[]
   watchedDevices     SnmpDevice[] @relation("DeviceWatcher")
+  
+  // RMM v2 - Governance relations
+  agentUpdateHistory    AgentUpdateHistory[]
+  activitySessions      EndpointActivitySession[]
+  webActivities         WebActivity[]
+  usbEvents             UsbEvent[]
+  driverInventory       DriverInventory[]
+  driverUpdateJobs      DriverUpdateJob[]
+  webFilterLogs         WebFilterLog[]
+  relayDiscoveries      RelayDiscoveredMachine[] @relation("RelayScanner")
+  relayDiscoveredAs     RelayDiscoveredMachine[] @relation("DiscoveredAgent")
+  relayConfig           RelayConfig?
+  relayDeploymentJobs   RelayDeploymentJob[]
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -1248,4 +1283,460 @@ model CaseStudy {
   updatedAt   DateTime @updatedAt
 
   @@index([isPublished, order])
+}
+
+// ============================================================
+// RMM v2 - MÓDULO DE GOVERNANÇA
+// Fase 1: Tabelas de Agent Versions, Governance, Relay, Web Filter
+// IMPORTANTE: Todas as tabelas são ADITIVAS - zero impacto nas existentes
+// ============================================================
+
+// ============================================================
+// 1. Controle de Versão do Agente
+// ============================================================
+
+model AgentVersion {
+  id              String   @id @default(cuid())
+  version         String   // Ex: "2.0.1"
+  agentType       String   // ps1, msi
+  channel         String   @default("stable") // stable, beta, canary
+  fileHashSha256  String   // Hash SHA256 do arquivo
+  fileSizeBytes   BigInt   // Tamanho em bytes
+  downloadUrl     String   // URL para download do agente
+  changelog       String?  @db.Text // Notas de versão
+  minOsVersion    String?  // Versão mínima do Windows
+  isActive        Boolean  @default(true)  // Se disponível para download
+  isCritical      Boolean  @default(false) // Update forçado
+  createdById     String?  // FK User que publicou
+  
+  // Multi-tenancy
+  tenantId        String?
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id])
+  
+  updateHistory   AgentUpdateHistory[]
+  
+  createdAt       DateTime @default(now())
+  
+  @@unique([version, agentType, channel])
+  @@index([agentType, channel, isActive])
+  @@index([tenantId])
+}
+
+model AgentUpdateHistory {
+  id            String    @id @default(cuid())
+  machineId     String
+  machine       RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  versionId     String?   // FK AgentVersion (versão destino)
+  version       AgentVersion? @relation(fields: [versionId], references: [id])
+  oldVersion    String?   // Versão anterior (texto livre)
+  newVersion    String    // Versão nova
+  agentType     String    // ps1, msi
+  status        String    @default("pending") // pending, downloading, installing, completed, failed, rolled_back
+  errorMessage  String?   @db.Text
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  rollbackAt    DateTime?
+  
+  @@index([machineId, startedAt(sort: Desc)])
+  @@index([status])
+}
+
+// ============================================================
+// 2. Governança - Produtividade
+// ============================================================
+
+model EndpointActivitySession {
+  id              String    @id @default(cuid())
+  machineId       String
+  machine         RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  windowTitle     String    @db.Text
+  processName     String    // Ex: "chrome.exe"
+  processPath     String?   @db.Text
+  category        String?   // productive, neutral, unproductive
+  startedAt       DateTime
+  endedAt         DateTime?
+  durationSeconds Int?
+  idleSeconds     Int       @default(0)
+  username        String?
+  isIdle          Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  
+  @@index([machineId, startedAt(sort: Desc)])
+  @@index([category, startedAt(sort: Desc)])
+  @@index([processName, startedAt(sort: Desc)])
+}
+
+model WebActivity {
+  id              String    @id @default(cuid())
+  machineId       String
+  machine         RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  url             String    @db.Text
+  domain          String    // Ex: "facebook.com"
+  pageTitle       String?   @db.Text
+  browser         String?   // chrome, edge, firefox
+  category        String?   // Categoria do domínio
+  durationSeconds Int?
+  visitedAt       DateTime
+  username        String?
+  isBlocked       Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  
+  @@index([machineId, visitedAt(sort: Desc)])
+  @@index([domain, visitedAt(sort: Desc)])
+}
+
+// ============================================================
+// 3. Governança - Controle USB
+// ============================================================
+
+model UsbEvent {
+  id            String    @id @default(cuid())
+  machineId     String
+  machine       RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  deviceId      String    // Hardware ID do dispositivo
+  deviceName    String?
+  deviceType    String?   // storage, hid, printer, other
+  vendorId      String?
+  productId     String?
+  serialNumber  String?
+  action        String    // connected, disconnected, blocked, allowed
+  policyApplied String?   // Nome da política aplicada
+  username      String?
+  eventAt       DateTime
+  createdAt     DateTime  @default(now())
+  
+  @@index([machineId, eventAt(sort: Desc)])
+  @@index([action, eventAt(sort: Desc)])
+}
+
+model UsbPolicy {
+  id            String    @id @default(cuid())
+  name          String
+  description   String?   @db.Text
+  companyId     String?   // NULL = política global
+  company       Company?  @relation(fields: [companyId], references: [id])
+  policyType    String    // allow, block, read_only, notify
+  deviceClass   String?   // Classe: storage, all, etc.
+  vendorId      String?
+  productId     String?
+  serialNumber  String?
+  priority      Int       @default(100) // Menor = maior prioridade
+  isActive      Boolean   @default(true)
+  createdById   String?
+  
+  // Multi-tenancy
+  tenantId      String?
+  tenant        Tenant?   @relation(fields: [tenantId], references: [id])
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([companyId, priority])
+  @@index([tenantId])
+}
+
+// ============================================================
+// 4. Governança - Drivers
+// ============================================================
+
+model DriverInventory {
+  id            String    @id @default(cuid())
+  machineId     String
+  machine       RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  driverName    String
+  driverVersion String?
+  provider      String?
+  driverDate    DateTime? // Data do driver
+  deviceName    String?
+  deviceClass   String?
+  infName       String?
+  isSigned      Boolean?
+  signer        String?
+  status        String    @default("ok") // ok, warning, error, update_available
+  scannedAt     DateTime  @default(now())
+  
+  updateJobs    DriverUpdateJob[]
+  
+  @@unique([machineId, infName, driverVersion])
+  @@index([machineId])
+  @@index([status])
+}
+
+model DriverUpdateJob {
+  id                String    @id @default(cuid())
+  machineId         String
+  machine           RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  driverInventoryId String?
+  driverInventory   DriverInventory? @relation(fields: [driverInventoryId], references: [id])
+  driverName        String
+  currentVersion    String?
+  targetVersion     String?
+  downloadUrl       String?   @db.Text
+  status            String    @default("pending") // pending, approved, downloading, installing, completed, failed, cancelled
+  approvedById      String?
+  errorMessage      String?   @db.Text
+  createdAt         DateTime  @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  
+  @@index([machineId, createdAt(sort: Desc)])
+  @@index([status])
+}
+
+// ============================================================
+// 5. Governança - Políticas de Produtividade
+// ============================================================
+
+model ProductivityPolicy {
+  id                      String    @id @default(cuid())
+  name                    String
+  companyId               String?   // NULL = global
+  company                 Company?  @relation(fields: [companyId], references: [id])
+  trackApps               Boolean   @default(true)
+  trackUrls               Boolean   @default(false)
+  trackIdle               Boolean   @default(true)
+  idleTimeoutSeconds      Int       @default(300)   // 5 min padrão
+  captureIntervalSeconds  Int       @default(30)    // A cada 30s
+  workingHoursStart       String?   @default("08:00") // TIME como string
+  workingHoursEnd         String?   @default("18:00")
+  workingDays             Int[]     @default([1, 2, 3, 4, 5]) // seg-sex
+  excludedProcesses       String[]  @default([])
+  productiveApps          Json      @default("[]")
+  unproductiveApps        Json      @default("[]")
+  isActive                Boolean   @default(true)
+  createdById             String?
+  
+  // Multi-tenancy
+  tenantId                String?
+  tenant                  Tenant?   @relation(fields: [tenantId], references: [id])
+  
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  
+  @@index([companyId])
+  @@index([tenantId])
+}
+
+// ============================================================
+// 6. Governança - Auditoria
+// ============================================================
+
+model GovernanceAuditLog {
+  id            String    @id @default(cuid())
+  action        String    // policy_created, policy_updated, usb_blocked, etc.
+  entityType    String    // usb_policy, productivity_policy, etc.
+  entityId      String?
+  oldValues     Json?
+  newValues     Json?
+  performedById String?   // FK User
+  ipAddress     String?
+  userAgent     String?   @db.Text
+  createdAt     DateTime  @default(now())
+  
+  @@index([action, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+}
+
+// ============================================================
+// 7. Relay - Discovery & Deploy
+// ============================================================
+
+model RelayDiscoveredMachine {
+  id              String    @id @default(cuid())
+  relayMachineId  String    // Máquina que fez o discovery
+  relayMachine    RmmMachine @relation("RelayScanner", fields: [relayMachineId], references: [id], onDelete: Cascade)
+  companyId       String?
+  company         Company?  @relation(fields: [companyId], references: [id])
+  hostname        String?
+  ipAddress       String    // IP como string (INET → String)
+  macAddress      String?   // MAC address como string
+  osInfo          String?
+  discoveryMethod String    // arp, ad, ping, netbios, manual
+  hasAgent        Boolean   @default(false)
+  agentMachineId  String?   // FK RmmMachine se já tem agente
+  agentMachine    RmmMachine? @relation("DiscoveredAgent", fields: [agentMachineId], references: [id])
+  status          String    @default("discovered") // discovered, pending_approval, approved, deploying, deployed, failed, ignored
+  firstSeenAt     DateTime  @default(now())
+  lastSeenAt      DateTime  @default(now())
+  approvedById    String?
+  approvedAt      DateTime?
+  notes           String?   @db.Text
+  
+  deploymentJobs  RelayDeploymentJob[]
+  
+  @@unique([relayMachineId, ipAddress])
+  @@index([relayMachineId, status])
+  @@index([companyId, status])
+  @@index([status])
+}
+
+model RelayDeploymentJob {
+  id                  String    @id @default(cuid())
+  discoveredMachineId String
+  discoveredMachine   RelayDiscoveredMachine @relation(fields: [discoveredMachineId], references: [id], onDelete: Cascade)
+  relayMachineId      String    // Máquina relay que executa
+  relayMachine        RmmMachine @relation(fields: [relayMachineId], references: [id], onDelete: Cascade)
+  deployMethod        String    // psexec, wmi, winrm, psremoting, manual
+  agentType           String    @default("msi") // ps1, msi
+  agentVersion        String?
+  clientToken         String?   // Token do cliente para o agente
+  status              String    @default("pending") // pending, queued, transferring, installing, completed, failed, cancelled
+  progressPct         Int       @default(0) // 0-100
+  errorMessage        String?   @db.Text
+  retryCount          Int       @default(0)
+  maxRetries          Int       @default(3)
+  createdById         String?
+  createdAt           DateTime  @default(now())
+  startedAt           DateTime?
+  completedAt         DateTime?
+  
+  @@index([relayMachineId, status])
+  @@index([status])
+}
+
+model RelayCredential {
+  id              String    @id @default(cuid())
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name            String    // Nome descritivo
+  username        String    // Usuário admin
+  encryptedPassword String  @db.Text // AES-256 encrypted
+  domain          String?   // Domínio AD (opcional)
+  credentialType  String    @default("windows") // windows, domain, local
+  isActive        Boolean   @default(true)
+  lastUsedAt      DateTime?
+  createdById     String?
+  
+  // Multi-tenancy
+  tenantId        String?
+  tenant          Tenant?   @relation(fields: [tenantId], references: [id])
+  
+  relayConfigs    RelayConfig[]
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([companyId])
+  @@index([tenantId])
+}
+
+model RelayConfig {
+  id                  String    @id @default(cuid())
+  machineId           String    @unique // FK RmmMachine (1:1)
+  machine             RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  companyId           String
+  company             Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  isRelay             Boolean   @default(false)
+  scanIntervalMinutes Int       @default(60)
+  scanSubnets         String[]  @default([]) // Subnets a escanear (CIDR)
+  scanMethods         String[]  @default(["arp", "ping"])
+  autoDeploy          Boolean   @default(false) // Deploy automático sem aprovação
+  credentialId        String?
+  credential          RelayCredential? @relation(fields: [credentialId], references: [id])
+  lastScanAt          DateTime?
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  
+  @@index([companyId])
+}
+
+// ============================================================
+// 8. Web Filtering
+// ============================================================
+
+model WebFilterCategory {
+  id          String    @id @default(cuid())
+  name        String    // Ex: "Redes Sociais"
+  slug        String    @unique
+  description String?   @db.Text
+  icon        String?   // Nome do ícone (ex: shield, game)
+  isSystem    Boolean   @default(false) // Categorias do sistema (não editáveis)
+  parentId    String?   // Hierarquia de categorias
+  parent      WebFilterCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    WebFilterCategory[] @relation("CategoryHierarchy")
+  
+  // Multi-tenancy
+  tenantId    String?
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id])
+  
+  domains     WebFilterCategoryDomain[]
+  logs        WebFilterLog[]
+  
+  createdAt   DateTime  @default(now())
+  
+  @@index([tenantId])
+}
+
+model WebFilterPolicy {
+  id                String    @id @default(cuid())
+  name              String
+  companyId         String?   // NULL = global
+  company           Company?  @relation(fields: [companyId], references: [id])
+  mode              String    @default("blacklist") // blacklist, whitelist
+  blockedDomains    String[]  @default([])
+  allowedDomains    String[]  @default([])
+  blockedCategories String[]  @default([]) // IDs das categorias bloqueadas
+  allowedCategories String[]  @default([])
+  blockedKeywords   String[]  @default([])
+  scheduleEnabled   Boolean   @default(false)
+  scheduleStart     String?   // TIME como string (HH:mm)
+  scheduleEnd       String?
+  scheduleDays      Int[]     @default([1, 2, 3, 4, 5])
+  blockPageMessage  String?   @default("Acesso bloqueado pela política da empresa.")
+  logOnly           Boolean   @default(false) // Apenas registra, não bloqueia
+  httpsInspection   Boolean   @default(false) // MITM para HTTPS (avançado)
+  safeSearch        Boolean   @default(true)  // Forçar SafeSearch
+  priority          Int       @default(100)
+  isActive          Boolean   @default(true)
+  createdById       String?
+  
+  // Multi-tenancy
+  tenantId          String?
+  tenant            Tenant?   @relation(fields: [tenantId], references: [id])
+  
+  logs              WebFilterLog[]
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  @@index([companyId, priority])
+  @@index([tenantId])
+}
+
+model WebFilterCategoryDomain {
+  id          String    @id @default(cuid())
+  categoryId  String
+  category    WebFilterCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  domain      String    // Ex: "facebook.com"
+  isRegex     Boolean   @default(false) // Se é padrão regex
+  source      String    @default("manual") // manual, import, auto, system
+  createdAt   DateTime  @default(now())
+  
+  @@unique([categoryId, domain])
+  @@index([domain])
+}
+
+model WebFilterLog {
+  id          String    @id @default(cuid())
+  machineId   String
+  machine     RmmMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  policyId    String?
+  policy      WebFilterPolicy? @relation(fields: [policyId], references: [id])
+  url         String    @db.Text
+  domain      String
+  categoryId  String?
+  category    WebFilterCategory? @relation(fields: [categoryId], references: [id])
+  action      String    // blocked, allowed, warned
+  reason      String?   // domain_blacklist, category_blocked, keyword_match
+  matchedRule String?   @db.Text
+  username    String?
+  ipAddress   String?
+  userAgent   String?   @db.Text
+  eventAt     DateTime
+  createdAt   DateTime  @default(now())
+  
+  @@index([machineId, eventAt(sort: Desc)])
+  @@index([domain, action, eventAt(sort: Desc)])
+  @@index([action, eventAt(sort: Desc)])
 }
