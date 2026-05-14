@@ -15,6 +15,7 @@ import {
   ArchiveRestore,
   AlertTriangle,
   Download as DownloadIcon,
+  Loader2,
 } from 'lucide-react';
 
 interface CompanyOption { id: string; name: string }
@@ -59,6 +60,10 @@ export default function InstallersPage() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
+  // agent auto-generate
+  const [generatingAgent, setGeneratingAgent] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
+
   // upload form
   const [file, setFile] = useState<File | null>(null);
   const [version, setVersion] = useState('');
@@ -88,6 +93,37 @@ export default function InstallersPage() {
       if (res.ok) setInstallers(await res.json());
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDownloadAgent(format: string) {
+    if (!selectedCompany) return;
+    setGeneratingAgent(true);
+    setAgentError(null);
+    try {
+      const res = await fetch('/api/rmm/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: selectedCompany, format }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Erro ao gerar agente' }));
+        throw new Error(err.error || 'Erro ao gerar agente');
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="(.+)"/);
+      const filename = match ? match[1] : `agente_rmm.ps1`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setAgentError(e.message || 'Erro ao gerar script do agente');
+    } finally {
+      setGeneratingAgent(false);
     }
   }
 
@@ -212,7 +248,7 @@ export default function InstallersPage() {
           <ArrowLeft size={20} />
         </Link>
         <Package size={24} className="text-accent-blue" />
-        <h1 className="text-2xl font-bold tm-text">Pacotes de Instalação (MSI)</h1>
+        <h1 className="text-2xl font-bold tm-text">Pacotes de Instalação</h1>
       </div>
 
       <div className="tm-bg-card tm-border border rounded-xl p-4 space-y-3">
@@ -234,10 +270,44 @@ export default function InstallersPage() {
 
       {selectedCompany && (
         <>
+          {/* Gerar Script do Agente RMM */}
+          <div className="tm-bg-card tm-border border rounded-xl p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <DownloadIcon size={18} className="text-cyan-400" />
+              <h2 className="tm-text font-semibold">Gerar Script do Agente RMM</h2>
+            </div>
+            <p className="tm-text-muted text-sm">
+              Gera automaticamente o instalador PowerShell para esta empresa com token embutido. Basta executar como Administrador na máquina do cliente.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => handleDownloadAgent('full')}
+                disabled={generatingAgent}
+                className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white font-medium disabled:opacity-50 flex items-center gap-2 text-sm"
+              >
+                {generatingAgent ? <Loader2 size={16} className="animate-spin" /> : <DownloadIcon size={16} />}
+                Instalador Completo (.ps1)
+              </button>
+              <button
+                onClick={() => handleDownloadAgent('uninstall')}
+                disabled={generatingAgent}
+                className="px-4 py-2 rounded-lg bg-red-600/80 hover:bg-red-700 text-white font-medium disabled:opacity-50 flex items-center gap-2 text-sm"
+              >
+                <Trash2 size={16} /> Desinstalador
+              </button>
+            </div>
+            {agentError && (
+              <div className="flex items-center gap-2 text-red-400 text-sm">
+                <AlertTriangle size={16} /> {agentError}
+              </div>
+            )}
+          </div>
+
+          {/* Upload de pacote customizado */}
           <div className="tm-bg-card tm-border border rounded-xl p-4 space-y-4">
             <div className="flex items-center gap-2">
               <Upload size={18} className="text-green-400" />
-              <h2 className="tm-text font-semibold">Upload de novo pacote</h2>
+              <h2 className="tm-text font-semibold">Upload de pacote customizado (opcional)</h2>
             </div>
             <form onSubmit={handleUpload} className="space-y-3">
               <div>
