@@ -218,14 +218,18 @@ export async function PATCH(
       }
     }
 
-    // Atualizar valor financeiro (apenas FINANCE ou ADMIN)
-    if (financialValue !== undefined && ['ADMIN', 'FINANCE'].includes(session.user.role)) {
+    // Atualizar valor financeiro:
+    // - ADMIN/FINANCE podem alterar a qualquer momento
+    // - SUPPORT pode definir ao encaminhar para o financeiro (forwardToFinance=true)
+    const canSetFinancial = ['ADMIN', 'FINANCE'].includes(session.user.role) || forwardToFinance === true;
+
+    if (financialValue !== undefined && canSetFinancial) {
       updateData.financialValue = financialValue;
       updateData.financialUpdatedAt = new Date();
       updateData.financialUpdatedBy = session.user.name || session.user.id;
     }
 
-    if (financialNotes !== undefined && ['ADMIN', 'FINANCE'].includes(session.user.role)) {
+    if (financialNotes !== undefined && canSetFinancial) {
       updateData.financialNotes = financialNotes;
     }
 
