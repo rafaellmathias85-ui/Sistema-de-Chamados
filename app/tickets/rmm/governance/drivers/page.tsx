@@ -6,20 +6,24 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import {
   HardDrive, ChevronLeft, RefreshCw, Search, Loader2,
-  AlertTriangle, Check, Clock, Filter,
+  AlertTriangle, Check, ShieldCheck, ShieldAlert,
 } from 'lucide-react';
 import MachineFilter from '@/components/rmm/machine-filter';
 
 interface DriverRecord {
   id: string;
   driverName: string;
-  driverVersion: string;
+  driverVersion: string | null;
+  infName: string;
   driverDate: string | null;
-  driverClass: string | null;
-  manufacturer: string | null;
-  needsUpdate: boolean;
-  collectedAt: string;
-  machine: { hostname: string; company: { name: string } };
+  deviceName: string | null;
+  deviceClass: string | null;
+  provider: string | null;
+  isSigned: boolean | null;
+  signer: string | null;
+  status: string;
+  scannedAt: string;
+  machine: { hostname: string; company: { id: string; name: string } };
 }
 
 export default function DriversPage() {
@@ -27,14 +31,14 @@ export default function DriversPage() {
   const [drivers, setDrivers] = useState<DriverRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterUpdate, setFilterUpdate] = useState<'all' | 'needs_update' | 'ok'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'warning' | 'ok'>('all');
   const [filterMachine, setFilterMachine] = useState('');
 
   const loadData = useCallback(async () => {
     if (!filterMachine) { setDrivers([]); setLoading(false); return; }
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: '500', machineId: filterMachine });
+      const params = new URLSearchParams({ machineId: filterMachine });
       const res = await fetch(`/api/rmm/governance/drivers?${params}`);
       if (res.ok) setDrivers(await res.json());
     } catch (e) {
@@ -49,14 +53,17 @@ export default function DriversPage() {
   const filtered = drivers.filter(d => {
     const matchSearch = !search ||
       d.driverName.toLowerCase().includes(search.toLowerCase()) ||
-      d.machine.hostname.toLowerCase().includes(search.toLowerCase()) ||
-      (d.manufacturer || '').toLowerCase().includes(search.toLowerCase()) ||
-      (d.driverClass || '').toLowerCase().includes(search.toLowerCase());
-    const matchFilter = filterUpdate === 'all' || (filterUpdate === 'needs_update' ? d.needsUpdate : !d.needsUpdate);
+      (d.machine?.hostname || '').toLowerCase().includes(search.toLowerCase()) ||
+      (d.provider || '').toLowerCase().includes(search.toLowerCase()) ||
+      (d.deviceName || '').toLowerCase().includes(search.toLowerCase()) ||
+      (d.deviceClass || '').toLowerCase().includes(search.toLowerCase());
+    const matchFilter = filterStatus === 'all' ||
+      (filterStatus === 'warning' ? d.status !== 'ok' : d.status === 'ok');
     return matchSearch && matchFilter;
   });
 
-  const needsUpdateCount = drivers.filter(d => d.needsUpdate).length;
+  const warningCount = drivers.filter(d => d.status !== 'ok').length;
+  const unsignedCount = drivers.filter(d => d.isSigned === false).length;
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-400" size={28} /></div>;
 
@@ -70,7 +77,8 @@ export default function DriversPage() {
           </h1>
           <p className="tm-text-secondary mt-1">
             {drivers.length} drivers coletados
-            {needsUpdateCount > 0 && <span className="text-yellow-400 ml-2">({needsUpdateCount} precisam atualização)</span>}
+            {warningCount > 0 && <span className="text-yellow-400 ml-2">({warningCount} com problemas)</span>}
+            {unsignedCount > 0 && <span className="text-red-400 ml-2">({unsignedCount} não assinados)</span>}
           </p>
         </div>
         <div className="flex gap-2">
@@ -83,22 +91,22 @@ export default function DriversPage() {
         </div>
       </div>
 
-      {/* Machine Filter */}
+      {/* Machine Filter (empresa + máquina) */}
       <MachineFilter value={filterMachine} onChange={setFilterMachine} />
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 tm-text-muted" size={16} />
-          <input type="text" placeholder="Buscar por driver, host, fabricante..." value={search} onChange={e => setSearch(e.target.value)}
+          <input type="text" placeholder="Buscar por driver, dispositivo, fabricante..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 tm-bg-card border tm-border rounded-lg tm-text text-sm" />
         </div>
         <div className="flex gap-2">
-          {(['all', 'needs_update', 'ok'] as const).map(f => (
-            <button key={f} onClick={() => setFilterUpdate(f)}
+          {(['all', 'warning', 'ok'] as const).map(f => (
+            <button key={f} onClick={() => setFilterStatus(f)}
               className={`px-3 py-2 rounded-lg text-sm border transition-colors ${
-                filterUpdate === f ? 'bg-blue-600 border-blue-500 text-white' : 'tm-bg-card tm-border tm-text hover:bg-white/10'
+                filterStatus === f ? 'bg-blue-600 border-blue-500 text-white' : 'tm-bg-card tm-border tm-text hover:bg-white/10'
               }`}>
-              {f === 'all' ? 'Todos' : f === 'needs_update' ? '⚠ Atualizar' : '✓ OK'}
+              {f === 'all' ? 'Todos' : f === 'warning' ? '⚠ Problemas' : '✓ OK'}
             </button>
           ))}
         </div>
@@ -107,7 +115,7 @@ export default function DriversPage() {
       {filtered.length === 0 ? (
         <div className="text-center py-20 tm-text-secondary">
           <HardDrive className="mx-auto mb-3 opacity-30" size={48} />
-          <p>Nenhum driver registrado</p>
+          <p>{filterMachine ? 'Nenhum driver registrado' : 'Selecione uma máquina para ver os drivers'}</p>
         </div>
       ) : (
         <div className="tm-bg-card border tm-border rounded-xl overflow-hidden">
@@ -118,8 +126,10 @@ export default function DriversPage() {
                   <th className="px-4 py-3 tm-text-secondary font-medium">STATUS</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">DRIVER</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">VERSÃO</th>
+                  <th className="px-4 py-3 tm-text-secondary font-medium">DISPOSITIVO</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">CLASSE</th>
-                  <th className="px-4 py-3 tm-text-secondary font-medium">FABRICANTE</th>
+                  <th className="px-4 py-3 tm-text-secondary font-medium">FORNECEDOR</th>
+                  <th className="px-4 py-3 tm-text-secondary font-medium">ASSINADO</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">HOSTNAME</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">EMPRESA</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">COLETADO EM</th>
@@ -130,19 +140,29 @@ export default function DriversPage() {
                   <motion.tr key={d.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.01 }}
                     className="border-b tm-border hover:bg-white/5 transition-colors">
                     <td className="px-4 py-3">
-                      {d.needsUpdate ? (
-                        <span className="text-yellow-400 flex items-center gap-1 text-xs"><AlertTriangle size={12} /> Atualizar</span>
+                      {d.status !== 'ok' ? (
+                        <span className="text-yellow-400 flex items-center gap-1 text-xs"><AlertTriangle size={12} /> {d.status}</span>
                       ) : (
                         <span className="text-green-400 flex items-center gap-1 text-xs"><Check size={12} /> OK</span>
                       )}
                     </td>
                     <td className="px-4 py-3 tm-text text-xs">{d.driverName}</td>
-                    <td className="px-4 py-3 font-mono tm-text-secondary text-xs">{d.driverVersion}</td>
-                    <td className="px-4 py-3 tm-text-secondary text-xs">{d.driverClass || '—'}</td>
-                    <td className="px-4 py-3 tm-text-secondary text-xs">{d.manufacturer || '—'}</td>
-                    <td className="px-4 py-3 font-mono tm-text text-xs">{d.machine.hostname}</td>
-                    <td className="px-4 py-3 tm-text-secondary text-xs">{d.machine.company.name}</td>
-                    <td className="px-4 py-3 tm-text-muted text-xs">{new Date(d.collectedAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
+                    <td className="px-4 py-3 font-mono tm-text-secondary text-xs">{d.driverVersion || '—'}</td>
+                    <td className="px-4 py-3 tm-text-secondary text-xs max-w-[200px] truncate" title={d.deviceName || ''}>{d.deviceName || '—'}</td>
+                    <td className="px-4 py-3 tm-text-secondary text-xs">{d.deviceClass || '—'}</td>
+                    <td className="px-4 py-3 tm-text-secondary text-xs">{d.provider || '—'}</td>
+                    <td className="px-4 py-3">
+                      {d.isSigned === true ? (
+                        <span className="text-green-400 flex items-center gap-1 text-xs"><ShieldCheck size={12} /> Sim</span>
+                      ) : d.isSigned === false ? (
+                        <span className="text-red-400 flex items-center gap-1 text-xs"><ShieldAlert size={12} /> Não</span>
+                      ) : (
+                        <span className="tm-text-muted text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 font-mono tm-text text-xs">{d.machine?.hostname || '—'}</td>
+                    <td className="px-4 py-3 tm-text-secondary text-xs">{d.machine?.company?.name || '—'}</td>
+                    <td className="px-4 py-3 tm-text-muted text-xs">{new Date(d.scannedAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
                   </motion.tr>
                 ))}
               </tbody>

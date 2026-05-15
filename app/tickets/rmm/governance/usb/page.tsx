@@ -12,15 +12,17 @@ import MachineFilter from '@/components/rmm/machine-filter';
 
 interface UsbEvent {
   id: string;
-  deviceName: string;
-  deviceType: string;
-  action: string;
-  serialNumber: string | null;
+  deviceId: string;
+  deviceName: string | null;
+  deviceType: string | null;
   vendorId: string | null;
   productId: string | null;
-  blocked: boolean;
-  timestamp: string;
-  machine: { hostname: string; company: { name: string } };
+  serialNumber: string | null;
+  action: string;
+  policyApplied: string | null;
+  username: string | null;
+  eventAt: string;
+  machine: { hostname: string; company: { id: string; name: string } };
 }
 
 interface UsbPolicy {
@@ -99,9 +101,11 @@ export default function UsbPage() {
 
   const filteredEvents = events.filter(e =>
     !search ||
-    e.deviceName.toLowerCase().includes(search.toLowerCase()) ||
-    e.machine.hostname.toLowerCase().includes(search.toLowerCase()) ||
-    e.machine.company.name.toLowerCase().includes(search.toLowerCase())
+    (e.deviceName || '').toLowerCase().includes(search.toLowerCase()) ||
+    (e.deviceId || '').toLowerCase().includes(search.toLowerCase()) ||
+    (e.machine?.hostname || '').toLowerCase().includes(search.toLowerCase()) ||
+    (e.machine?.company?.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (e.username || '').toLowerCase().includes(search.toLowerCase())
   );
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-400" size={28} /></div>;
@@ -136,8 +140,8 @@ export default function UsbPage() {
         ))}
       </div>
 
-      {/* Machine Filter */}
-      <MachineFilter value={filterMachine} onChange={setFilterMachine} />
+      {/* Machine Filter (empresa + máquina) */}
+      {tab === 'events' && <MachineFilter value={filterMachine} onChange={setFilterMachine} />}
 
       {tab === 'events' && (
         <>
@@ -149,7 +153,7 @@ export default function UsbPage() {
           {filteredEvents.length === 0 ? (
             <div className="text-center py-20 tm-text-secondary">
               <Usb className="mx-auto mb-3 opacity-30" size={48} />
-              <p>Nenhum evento USB registrado</p>
+              <p>{filterMachine ? 'Nenhum evento USB registrado' : 'Selecione uma máquina para ver eventos USB'}</p>
             </div>
           ) : (
             <div className="tm-bg-card border tm-border rounded-xl overflow-hidden">
@@ -157,12 +161,14 @@ export default function UsbPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b tm-border text-left">
-                      <th className="px-4 py-3 tm-text-secondary font-medium">STATUS</th>
+                      <th className="px-4 py-3 tm-text-secondary font-medium">AÇÃO</th>
                       <th className="px-4 py-3 tm-text-secondary font-medium">DISPOSITIVO</th>
                       <th className="px-4 py-3 tm-text-secondary font-medium">TIPO</th>
-                      <th className="px-4 py-3 tm-text-secondary font-medium">AÇÃO</th>
+                      <th className="px-4 py-3 tm-text-secondary font-medium">SERIAL</th>
+                      <th className="px-4 py-3 tm-text-secondary font-medium">USUÁRIO</th>
                       <th className="px-4 py-3 tm-text-secondary font-medium">HOSTNAME</th>
                       <th className="px-4 py-3 tm-text-secondary font-medium">EMPRESA</th>
+                      <th className="px-4 py-3 tm-text-secondary font-medium">POLÍTICA</th>
                       <th className="px-4 py-3 tm-text-secondary font-medium">DATA</th>
                     </tr>
                   </thead>
@@ -171,18 +177,31 @@ export default function UsbPage() {
                       <motion.tr key={ev.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
                         className="border-b tm-border hover:bg-white/5 transition-colors">
                         <td className="px-4 py-3">
-                          {ev.blocked ? (
-                            <span className="text-red-400 flex items-center gap-1 text-xs"><AlertTriangle size={12} /> Bloqueado</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            ev.action === 'blocked' ? 'bg-red-500/20 text-red-400' :
+                            ev.action === 'connected' ? 'bg-green-500/20 text-green-400' :
+                            ev.action === 'disconnected' ? 'bg-gray-500/20 tm-text-secondary' :
+                            'bg-yellow-500/20 text-yellow-400'
+                          }`}>
+                            {ev.action === 'connected' ? 'Conectado' :
+                             ev.action === 'disconnected' ? 'Desconectado' :
+                             ev.action === 'blocked' ? 'Bloqueado' : ev.action}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 tm-text text-xs">{ev.deviceName || ev.deviceId || '—'}</td>
+                        <td className="px-4 py-3 tm-text-secondary text-xs">{ev.deviceType || '—'}</td>
+                        <td className="px-4 py-3 font-mono tm-text-muted text-xs">{ev.serialNumber || '—'}</td>
+                        <td className="px-4 py-3 tm-text text-xs">{ev.username || '—'}</td>
+                        <td className="px-4 py-3 font-mono text-xs tm-text">{ev.machine?.hostname || '—'}</td>
+                        <td className="px-4 py-3 tm-text-secondary text-xs">{ev.machine?.company?.name || '—'}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {ev.policyApplied ? (
+                            <span className="text-orange-400">{ev.policyApplied}</span>
                           ) : (
-                            <span className="text-green-400 flex items-center gap-1 text-xs"><Check size={12} /> Permitido</span>
+                            <span className="tm-text-muted">—</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 tm-text text-xs">{ev.deviceName}</td>
-                        <td className="px-4 py-3 tm-text-secondary text-xs">{ev.deviceType}</td>
-                        <td className="px-4 py-3 tm-text-secondary text-xs">{ev.action}</td>
-                        <td className="px-4 py-3 font-mono text-xs tm-text">{ev.machine.hostname}</td>
-                        <td className="px-4 py-3 tm-text-secondary text-xs">{ev.machine.company.name}</td>
-                        <td className="px-4 py-3 tm-text-muted text-xs">{new Date(ev.timestamp).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
+                        <td className="px-4 py-3 tm-text-muted text-xs">{new Date(ev.eventAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
                       </motion.tr>
                     ))}
                   </tbody>

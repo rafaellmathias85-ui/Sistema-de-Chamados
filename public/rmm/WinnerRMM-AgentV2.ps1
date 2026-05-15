@@ -176,12 +176,12 @@ while ($true) {
             
             # Atividade do endpoint
             if (Get-Command Send-ActivitySession -ErrorAction SilentlyContinue) {
-                Send-ActivitySession -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                Send-ActivitySession -ApiUrl $API_URL -Token $COMPANY_TOKEN -Hostname $hostname
             }
             
             # Eventos USB
             if (Get-Command Send-UsbEvents -ErrorAction SilentlyContinue) {
-                Send-UsbEvents -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                Send-UsbEvents -ApiUrl $API_URL -Token $COMPANY_TOKEN -Hostname $hostname
             }
             
             # Web Activity + Web Filter logs
@@ -194,7 +194,7 @@ while ($true) {
             
             # Enforce politicas
             if (Get-Command Enforce-UsbPolicies -ErrorAction SilentlyContinue) {
-                Enforce-UsbPolicies -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                Enforce-UsbPolicies -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId -Hostname $hostname
             }
             if (Get-Command Enforce-ProductivityPolicies -ErrorAction SilentlyContinue) {
                 Enforce-ProductivityPolicies -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
@@ -207,7 +207,7 @@ while ($true) {
         if ($machineId -and ((Get-Date) - $lastDriverScan).TotalSeconds -ge $DRIVER_SCAN_INTERVAL) {
             if (Get-Command Send-DriverInventory -ErrorAction SilentlyContinue) {
                 Write-Log "[Governance] Running driver inventory..."
-                Send-DriverInventory -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                Send-DriverInventory -ApiUrl $API_URL -Token $COMPANY_TOKEN -Hostname $hostname
             }
             $lastDriverScan = Get-Date
         }
@@ -216,7 +216,7 @@ while ($true) {
         if ($machineId -and ((Get-Date) - $lastDiskHealthScan).TotalSeconds -ge $DISK_HEALTH_INTERVAL) {
             if (Get-Command Send-DiskHealth -ErrorAction SilentlyContinue) {
                 Write-Log "[Governance] Running disk health scan..."
-                Send-DiskHealth -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                Send-DiskHealth -ApiUrl $API_URL -Token $COMPANY_TOKEN -Hostname $hostname
             }
             $lastDiskHealthScan = Get-Date
         }

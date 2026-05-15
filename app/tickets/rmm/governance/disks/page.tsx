@@ -181,7 +181,7 @@ export default function DiskHealthPage() {
   const filtered = disks.filter(d => {
     const matchSearch = !search ||
       (d.model || '').toLowerCase().includes(search.toLowerCase()) ||
-      d.machine.hostname.toLowerCase().includes(search.toLowerCase()) ||
+      (d.machine?.hostname || '').toLowerCase().includes(search.toLowerCase()) ||
       (d.serialNumber || '').toLowerCase().includes(search.toLowerCase()) ||
       d.mediaType.toLowerCase().includes(search.toLowerCase());
     const matchStatus = filterStatus === 'all' || d.smartStatus === filterStatus;

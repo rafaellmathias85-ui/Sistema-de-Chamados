@@ -91,7 +91,15 @@ export async function GET(request: NextRequest) {
       where,
       orderBy: { scannedAt: 'desc' },
       take: 500,
-      include: { machine: { select: { hostname: true } } },
+      include: {
+        machine: {
+          select: {
+            hostname: true,
+            ipAddress: true,
+            company: { select: { id: true, name: true } },
+          },
+        },
+      },
     });
 
     return NextResponse.json(drivers);

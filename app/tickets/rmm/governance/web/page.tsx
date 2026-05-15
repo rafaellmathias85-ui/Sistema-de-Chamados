@@ -33,7 +33,7 @@ interface BrowsingEntry {
   durationSeconds: number | null;
   visitedAt: string;
   username: string | null;
-  machine: { hostname: string };
+  machine: { hostname: string; company: { id: string; name: string } };
 }
 
 interface WfPolicy {
@@ -139,7 +139,8 @@ export default function WebPage() {
     !search ||
     l.url.toLowerCase().includes(search.toLowerCase()) ||
     l.domain.toLowerCase().includes(search.toLowerCase()) ||
-    l.machine.hostname.toLowerCase().includes(search.toLowerCase())
+    (l.machine?.hostname || '').toLowerCase().includes(search.toLowerCase()) ||
+    (l.machine?.company?.name || '').toLowerCase().includes(search.toLowerCase())
   );
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-400" size={28} /></div>;
@@ -207,6 +208,8 @@ export default function WebPage() {
                         <th className="px-4 py-3 tm-text-secondary font-medium">DOMÍNIO</th>
                         <th className="px-4 py-3 tm-text-secondary font-medium">PÁGINA</th>
                         <th className="px-4 py-3 tm-text-secondary font-medium">USUÁRIO</th>
+                        <th className="px-4 py-3 tm-text-secondary font-medium">HOSTNAME</th>
+                        <th className="px-4 py-3 tm-text-secondary font-medium">EMPRESA</th>
                         <th className="px-4 py-3 tm-text-secondary font-medium">DURAÇÃO</th>
                       </tr>
                     </thead>
@@ -228,6 +231,8 @@ export default function WebPage() {
                           <td className="px-4 py-2.5 font-mono text-xs tm-text">{b.domain}</td>
                           <td className="px-4 py-2.5 tm-text-secondary text-xs max-w-[300px] truncate" title={b.pageTitle || b.url}>{b.pageTitle || b.url}</td>
                           <td className="px-4 py-2.5 tm-text-secondary text-xs">{b.username || '—'}</td>
+                          <td className="px-4 py-2.5 font-mono tm-text text-xs">{b.machine?.hostname || '—'}</td>
+                          <td className="px-4 py-2.5 tm-text-secondary text-xs">{b.machine?.company?.name || '—'}</td>
                           <td className="px-4 py-2.5 tm-text-muted text-xs">{b.durationSeconds ? `${Math.floor(b.durationSeconds / 60)}m ${b.durationSeconds % 60}s` : '—'}</td>
                         </motion.tr>
                       ))}

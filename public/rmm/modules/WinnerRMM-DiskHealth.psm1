@@ -455,18 +455,18 @@ function Send-DiskHealth {
         URL base da API (ex: https://www.wticorp.com.br)
     .PARAMETER Token
         Token RMM da empresa
-    .PARAMETER MachineId
-        ID da máquina (hostname)
+    .PARAMETER Hostname
+        Hostname da máquina (default: $env:COMPUTERNAME)
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)][string]$ApiUrl,
         [Parameter(Mandatory=$true)][string]$Token,
-        [Parameter(Mandatory=$true)][string]$MachineId
+        [string]$Hostname = $env:COMPUTERNAME
     )
 
     try {
-        $hostname = $env:COMPUTERNAME
+        $hostname = $Hostname
         Write-DiskLog "[DiskHealth] Coletando dados de saúde dos discos..."
 
         $disks = Get-DiskHealthData

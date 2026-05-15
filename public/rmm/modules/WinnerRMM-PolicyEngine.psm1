@@ -36,7 +36,8 @@ function Enforce-UsbPolicies {
     param(
         [string]$ApiUrl,
         [string]$Token,
-        [string]$MachineId
+        [string]$MachineId,
+        [string]$Hostname = $env:COMPUTERNAME
     )
     
     $policies = Get-MachinePolicies -ApiUrl $ApiUrl -Token $Token -MachineId $MachineId
@@ -53,51 +54,70 @@ function Enforce-UsbPolicies {
             name = $dep.Description
             type = $dep.PNPClass
             pnpId = $dep.PNPDeviceID
+            deviceId = $dep.DeviceID
         }
     }
     
     foreach ($dev in $usbDevices) {
         foreach ($pol in $blockPolicies) {
-            $match = $true
+            $blocked = $false
             
-            if ($pol.deviceType -and $dev.type -ne $pol.deviceType) { $match = $false }
-            if ($pol.vendorId -and $dev.pnpId -notmatch "VID_$($pol.vendorId)") { $match = $false }
-            if ($pol.productId -and $dev.pnpId -notmatch "PID_$($pol.productId)") { $match = $false }
-            if ($pol.serialNumber -and $dev.pnpId -notmatch $pol.serialNumber) { $match = $false }
+            # Verificar se o tipo do dispositivo corresponde a politica
+            if ($pol.deviceTypes) {
+                $allowedTypes = $pol.deviceTypes | ConvertFrom-Json -ErrorAction SilentlyContinue
+                if ($allowedTypes -and $dev.type -in $allowedTypes) {
+                    $blocked = $true
+                }
+            }
             
-            if ($match) {
-                Write-Log "[PolicyEngine] USB BLOCKED: $($dev.name) by policy '$($pol.name)'"
+            # Verificar whitelist
+            if ($blocked -and $pol.whitelist) {
+                $wl = $pol.whitelist | ConvertFrom-Json -ErrorAction SilentlyContinue
+                if ($wl -and $dev.pnpId -in $wl) {
+                    $blocked = $false
+                }
+            }
+            
+            if ($blocked) {
+                Write-Log "[PolicyEngine] USB BLOCKED: $($dev.name) (policy: $($pol.name))"
                 
-                # Desabilitar dispositivo via DevCon ou PowerShell
+                # Tentar desabilitar dispositivo (requer admin)
                 try {
-                    $pnpDev = Get-PnpDevice | Where-Object { $_.InstanceId -eq $dev.pnpId }
-                    if ($pnpDev) {
-                        Disable-PnpDevice -InstanceId $dev.pnpId -Confirm:$false
-                        Write-Log "[PolicyEngine] Device disabled: $($dev.name)"
-                    }
+                    $pnpDev = Get-PnpDevice -InstanceId $dev.pnpId -ErrorAction Stop
+                    Disable-PnpDevice -InstanceId $dev.pnpId -Confirm:$false -ErrorAction Stop
+                    Write-Log "[PolicyEngine] Device disabled: $($dev.pnpId)"
                 } catch {
                     Write-Log "[PolicyEngine] Failed to disable device: $($_.Exception.Message)"
                 }
                 
-                # Reportar evento de bloqueio
+                # Reportar evento de bloqueio para a API
                 try {
+                    # Extrair VID/PID do PNPDeviceID
+                    $vid = ""
+                    $pid = ""
+                    if ($dev.pnpId -match 'VID_([0-9A-Fa-f]{4})') { $vid = $Matches[1] }
+                    if ($dev.pnpId -match 'PID_([0-9A-Fa-f]{4})') { $pid = $Matches[1] }
+                    
                     $body = @{
-                        token = $Token
-                        machineId = $MachineId
-                        events = @(
+                        token    = $Token
+                        hostname = $Hostname
+                        events   = @(
                             @{
-                                deviceName = $dev.name
-                                deviceType = $dev.type
-                                action = "blocked"
-                                serialNumber = $dev.pnpId
-                                blocked = $true
-                                policyId = $pol.id
-                                timestamp = (Get-Date).ToUniversalTime().ToString("o")
+                                device_name    = $dev.name
+                                device_type    = if ($dev.type) { $dev.type } else { "Unknown" }
+                                device_id      = $dev.deviceId
+                                action         = "blocked"
+                                serial_number  = $dev.pnpId
+                                vendor_id      = $vid
+                                product_id     = $pid
+                                policy_applied = $pol.name
+                                event_at       = (Get-Date).ToUniversalTime().ToString("o")
+                                username       = $env:USERNAME
                             }
                         )
                     } | ConvertTo-Json -Depth 5
                     
-                    Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/usb-events" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 10
+                    Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/usb-events" -Method POST -Body $body -ContentType "application/json; charset=utf-8" -TimeoutSec 10
                 } catch {}
             }
         }

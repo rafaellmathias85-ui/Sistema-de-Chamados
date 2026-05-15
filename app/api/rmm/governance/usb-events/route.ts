@@ -66,7 +66,15 @@ export async function GET(request: NextRequest) {
       where,
       orderBy: { eventAt: 'desc' },
       take: limit,
-      include: { machine: { select: { hostname: true, companyId: true } } },
+      include: {
+        machine: {
+          select: {
+            hostname: true,
+            ipAddress: true,
+            company: { select: { id: true, name: true } },
+          },
+        },
+      },
     });
 
     return NextResponse.json(events);

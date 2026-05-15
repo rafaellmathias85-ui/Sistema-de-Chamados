@@ -6,22 +6,24 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import {
   Activity, ChevronLeft, RefreshCw, Search, Loader2,
-  Monitor, Clock, Pause, Play, Filter,
+  Monitor, Clock, Pause, Play,
 } from 'lucide-react';
 import MachineFilter from '@/components/rmm/machine-filter';
 
 interface ActivitySession {
   id: string;
   machineId: string;
-  username: string;
-  activeApp: string | null;
-  activeTitle: string | null;
+  windowTitle: string;
+  processName: string;
+  processPath: string | null;
+  category: string | null;
   startedAt: string;
   endedAt: string | null;
-  activeSeconds: number;
+  durationSeconds: number | null;
   idleSeconds: number;
+  username: string | null;
   isIdle: boolean;
-  machine: { hostname: string; company: { name: string } };
+  machine: { hostname: string; company: { id: string; name: string } };
 }
 
 export default function ActivityPage() {
@@ -48,7 +50,8 @@ export default function ActivityPage() {
 
   useEffect(() => { if (session?.user) loadData(); }, [session, loadData]);
 
-  const formatDuration = (seconds: number) => {
+  const formatDuration = (seconds: number | null | undefined) => {
+    if (!seconds || seconds <= 0) return '—';
     if (seconds < 60) return `${seconds}s`;
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
     return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
@@ -56,10 +59,11 @@ export default function ActivityPage() {
 
   const filtered = sessions.filter(s => {
     const matchSearch = !search ||
-      s.username.toLowerCase().includes(search.toLowerCase()) ||
-      s.machine.hostname.toLowerCase().includes(search.toLowerCase()) ||
-      s.machine.company.name.toLowerCase().includes(search.toLowerCase()) ||
-      (s.activeApp || '').toLowerCase().includes(search.toLowerCase());
+      (s.username || '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.machine?.hostname || '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.machine?.company?.name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.processName || '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.windowTitle || '').toLowerCase().includes(search.toLowerCase());
     const matchFilter = filterIdle === 'all' || (filterIdle === 'idle' ? s.isIdle : !s.isIdle);
     return matchSearch && matchFilter;
   });
@@ -84,7 +88,7 @@ export default function ActivityPage() {
         </div>
       </div>
 
-      {/* Machine Filter */}
+      {/* Machine Filter (empresa + máquina) */}
       <MachineFilter value={filterMachine} onChange={setFilterMachine} />
 
       {/* Filters */}
@@ -93,7 +97,7 @@ export default function ActivityPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 tm-text-muted" size={16} />
           <input
             type="text"
-            placeholder="Buscar por host, usuário, app..."
+            placeholder="Buscar por host, usuário, processo, título..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 tm-bg-card border tm-border rounded-lg tm-text text-sm"
@@ -119,8 +123,8 @@ export default function ActivityPage() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-20 tm-text-secondary">
           <Activity className="mx-auto mb-3 opacity-30" size={48} />
-          <p>Nenhuma sessão de atividade registrada</p>
-          <p className="text-xs mt-1">As sessões aparecerão quando o agente v2 iniciar o monitoramento</p>
+          <p>{filterMachine ? 'Nenhuma sessão de atividade registrada' : 'Selecione uma máquina para ver a atividade'}</p>
+          {filterMachine && <p className="text-xs mt-1">As sessões aparecerão quando o agente v2 iniciar o monitoramento</p>}
         </div>
       ) : (
         <div className="tm-bg-card border tm-border rounded-xl overflow-hidden">
@@ -131,10 +135,12 @@ export default function ActivityPage() {
                   <th className="px-4 py-3 tm-text-secondary font-medium">STATUS</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">HOSTNAME</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">USUÁRIO</th>
-                  <th className="px-4 py-3 tm-text-secondary font-medium">APLICATIVO ATIVO</th>
+                  <th className="px-4 py-3 tm-text-secondary font-medium">PROCESSO</th>
+                  <th className="px-4 py-3 tm-text-secondary font-medium">TÍTULO DA JANELA</th>
+                  <th className="px-4 py-3 tm-text-secondary font-medium">CATEGORIA</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">EMPRESA</th>
-                  <th className="px-4 py-3 tm-text-secondary font-medium">TEMPO ATIVO</th>
-                  <th className="px-4 py-3 tm-text-secondary font-medium">TEMPO OCIOSO</th>
+                  <th className="px-4 py-3 tm-text-secondary font-medium">DURAÇÃO</th>
+                  <th className="px-4 py-3 tm-text-secondary font-medium">OCIOSO</th>
                   <th className="px-4 py-3 tm-text-secondary font-medium">INÍCIO</th>
                 </tr>
               </thead>
@@ -154,14 +160,23 @@ export default function ActivityPage() {
                         <span className="flex items-center gap-1.5 text-green-400 text-xs"><Play size={12} /> Ativo</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs tm-text">{s.machine.hostname}</td>
-                    <td className="px-4 py-3 tm-text text-xs">{s.username}</td>
-                    <td className="px-4 py-3 tm-text text-xs max-w-[200px] truncate" title={s.activeTitle || ''}>
-                      {s.activeApp || '—'}
-                      {s.activeTitle && <span className="tm-text-muted ml-1">({s.activeTitle})</span>}
+                    <td className="px-4 py-3 font-mono text-xs tm-text">{s.machine?.hostname || '—'}</td>
+                    <td className="px-4 py-3 tm-text text-xs">{s.username || '—'}</td>
+                    <td className="px-4 py-3 tm-text text-xs font-mono">{s.processName || '—'}</td>
+                    <td className="px-4 py-3 tm-text text-xs max-w-[250px] truncate" title={s.windowTitle || ''}>
+                      {s.windowTitle || '—'}
                     </td>
-                    <td className="px-4 py-3 tm-text-secondary text-xs">{s.machine.company.name}</td>
-                    <td className="px-4 py-3 text-green-400 text-xs font-mono">{formatDuration(s.activeSeconds)}</td>
+                    <td className="px-4 py-3 text-xs">
+                      <span className={`px-2 py-0.5 rounded-full text-xs ${
+                        s.category === 'productive' ? 'bg-green-500/20 text-green-400' :
+                        s.category === 'unproductive' ? 'bg-red-500/20 text-red-400' :
+                        'bg-gray-500/20 tm-text-secondary'
+                      }`}>
+                        {s.category === 'productive' ? 'Produtivo' : s.category === 'unproductive' ? 'Improdutivo' : s.category || 'Neutro'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 tm-text-secondary text-xs">{s.machine?.company?.name || '—'}</td>
+                    <td className="px-4 py-3 text-green-400 text-xs font-mono">{formatDuration(s.durationSeconds)}</td>
                     <td className="px-4 py-3 text-yellow-400 text-xs font-mono">{formatDuration(s.idleSeconds)}</td>
                     <td className="px-4 py-3 tm-text-muted text-xs">
                       {new Date(s.startedAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}

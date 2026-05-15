@@ -10,7 +10,7 @@ function Send-ActivitySession {
     param(
         [string]$ApiUrl,
         [string]$Token,
-        [string]$MachineId
+        [string]$Hostname = $env:COMPUTERNAME
     )
     
     try {
@@ -38,6 +38,7 @@ function Send-ActivitySession {
         [Win32]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
         $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         $appName = if ($proc) { $proc.ProcessName } else { "unknown" }
+        $appPath = if ($proc -and $proc.Path) { $proc.Path } else { $null }
         
         # Verificar idle time
         Add-Type @"
@@ -56,21 +57,22 @@ function Send-ActivitySession {
         
         $body = @{
             token = $Token
-            machineId = $MachineId
+            hostname = $Hostname
             sessions = @(
                 @{
-                    username = $user
-                    activeApp = $appName
-                    activeTitle = $title
-                    startedAt = (Get-Date).ToUniversalTime().ToString("o")
-                    activeSeconds = if ($isIdle) { 0 } else { 60 }
-                    idleSeconds = if ($isIdle) { 60 } else { 0 }
-                    isIdle = $isIdle
+                    username      = $user
+                    process_name  = $appName
+                    window_title  = $title
+                    process_path  = $appPath
+                    started_at    = (Get-Date).ToUniversalTime().ToString("o")
+                    duration_seconds = if ($isIdle) { 0 } else { 60 }
+                    idle_seconds  = if ($isIdle) { 60 } else { 0 }
+                    is_idle       = $isIdle
                 }
             )
         } | ConvertTo-Json -Depth 5
         
-        Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/activity" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 15
+        Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/activity" -Method POST -Body $body -ContentType "application/json; charset=utf-8" -TimeoutSec 15
         Write-Log "[Governance] Activity session sent: $appName ($title)"
     } catch {
         Write-Log "[Governance] Error sending activity: $($_.Exception.Message)"
@@ -81,7 +83,7 @@ function Send-UsbEvents {
     param(
         [string]$ApiUrl,
         [string]$Token,
-        [string]$MachineId
+        [string]$Hostname = $env:COMPUTERNAME
     )
     
     try {
@@ -89,12 +91,18 @@ function Send-UsbEvents {
         $cutoff = (Get-Date).AddMinutes(-5)
         $usbDevices = Get-WmiObject Win32_USBControllerDevice | ForEach-Object {
             $dep = [wmi]$_.Dependent
+            # Extrair VendorId e ProductId do PNPDeviceID (formato: USB\VID_XXXX&PID_XXXX\...)
+            $vid = ""
+            $pid = ""
+            if ($dep.PNPDeviceID -match 'VID_([0-9A-Fa-f]{4})') { $vid = $Matches[1] }
+            if ($dep.PNPDeviceID -match 'PID_([0-9A-Fa-f]{4})') { $pid = $Matches[1] }
             @{
-                deviceName = $dep.Description
-                deviceType = $dep.PNPClass
-                serialNumber = $dep.PNPDeviceID
-                vendorId = ""
-                productId = ""
+                device_name   = $dep.Description
+                device_type   = if ($dep.PNPClass) { $dep.PNPClass } else { "Unknown" }
+                device_id     = $dep.DeviceID
+                serial_number = $dep.PNPDeviceID
+                vendor_id     = $vid
+                product_id    = $pid
             }
         }
         
@@ -108,24 +116,26 @@ function Send-UsbEvents {
             $events = @()
             foreach ($dev in $usbDevices) {
                 $events += @{
-                    deviceName = $dev.deviceName
-                    deviceType = if ($dev.deviceType) { $dev.deviceType } else { "Unknown" }
-                    action = "connected"
-                    serialNumber = $dev.serialNumber
-                    vendorId = $dev.vendorId
-                    productId = $dev.productId
-                    timestamp = (Get-Date).ToUniversalTime().ToString("o")
+                    device_name   = $dev.device_name
+                    device_type   = $dev.device_type
+                    device_id     = $dev.device_id
+                    action        = "connected"
+                    serial_number = $dev.serial_number
+                    vendor_id     = $dev.vendor_id
+                    product_id    = $dev.product_id
+                    event_at      = (Get-Date).ToUniversalTime().ToString("o")
+                    username      = $env:USERNAME
                 }
             }
             
             if ($events.Count -gt 0) {
                 $body = @{
-                    token = $Token
-                    machineId = $MachineId
-                    events = $events
+                    token    = $Token
+                    hostname = $Hostname
+                    events   = $events
                 } | ConvertTo-Json -Depth 5
                 
-                Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/usb-events" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 15
+                Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/usb-events" -Method POST -Body $body -ContentType "application/json; charset=utf-8" -TimeoutSec 15
                 Write-Log "[Governance] USB events sent: $($events.Count) devices"
             }
         }
@@ -138,29 +148,33 @@ function Send-DriverInventory {
     param(
         [string]$ApiUrl,
         [string]$Token,
-        [string]$MachineId
+        [string]$Hostname = $env:COMPUTERNAME
     )
     
     try {
         $drivers = Get-WmiObject Win32_PnPSignedDriver | Where-Object { $_.DriverVersion } | ForEach-Object {
             @{
-                driverName = $_.DeviceName
-                driverVersion = $_.DriverVersion
-                driverDate = if ($_.DriverDate) { $_.DriverDate.Substring(0,8) } else { $null }
-                driverClass = $_.DeviceClass
-                manufacturer = $_.Manufacturer
-                infName = $_.InfName
+                driver_name    = $_.DeviceName
+                driver_version = $_.DriverVersion
+                driver_date    = if ($_.DriverDate) { $_.DriverDate.Substring(0,8) } else { $null }
+                device_class   = $_.DeviceClass
+                device_name    = $_.DeviceName
+                provider       = $_.Manufacturer
+                inf_name       = $_.InfName
+                is_signed      = $_.IsSigned
+                signer         = $_.Signer
+                status         = "ok"
             }
         }
         
         if ($drivers.Count -gt 0) {
             $body = @{
-                token = $Token
-                machineId = $MachineId
-                drivers = $drivers
+                token    = $Token
+                hostname = $Hostname
+                drivers  = $drivers
             } | ConvertTo-Json -Depth 5
             
-            Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/drivers" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30
+            Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/drivers" -Method POST -Body $body -ContentType "application/json; charset=utf-8" -TimeoutSec 30
             Write-Log "[Governance] Driver inventory sent: $($drivers.Count) drivers"
         }
     } catch {

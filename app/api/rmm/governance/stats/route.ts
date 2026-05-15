@@ -13,7 +13,7 @@ export async function GET() {
     }
 
     const [
-      activitySessions,
+      endpointsMonitored,
       usbEvents,
       webMonitoredMachines,
       drivers,
@@ -22,7 +22,8 @@ export async function GET() {
       auditLogs,
       totalMachines,
     ] = await Promise.all([
-      prisma.endpointActivitySession.count(),
+      // Contar máquinas únicas com sessões de atividade (não total de sessões)
+      prisma.endpointActivitySession.groupBy({ by: ['machineId'] }).then(g => g.length),
       prisma.usbEvent.count(),
       // Contar máquinas distintas com webActivity (não URLs individuais)
       prisma.webActivity.groupBy({ by: ['machineId'] }).then(g => g.length),
@@ -34,9 +35,9 @@ export async function GET() {
     ]);
 
     return NextResponse.json({
-      activitySessions,
+      endpointsMonitored,
       usbEvents,
-      webActivities: webMonitoredMachines, // Máquinas com monitoramento web
+      webActivities: webMonitoredMachines,
       drivers,
       relayDiscovered,
       agentVersions,

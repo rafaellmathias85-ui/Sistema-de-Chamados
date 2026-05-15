@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 
 interface GovStats {
-  activitySessions: number;
+  endpointsMonitored: number;
   usbEvents: number;
   webActivities: number;
   drivers: number;
@@ -55,7 +55,7 @@ export default function GovernanceDashboard() {
   }
 
   const modules = [
-    { href: '/tickets/rmm/governance/activity', icon: Activity, label: 'Atividade de Endpoints', desc: 'Sessões de uso, aplicativos, tempo ativo/ocioso', color: 'text-green-400', border: 'border-green-500/30', count: stats?.activitySessions },
+    { href: '/tickets/rmm/governance/activity', icon: Activity, label: 'Atividade de Endpoints', desc: 'Sessões de uso, aplicativos, tempo ativo/ocioso', color: 'text-green-400', border: 'border-green-500/30', count: stats?.endpointsMonitored },
     { href: '/tickets/rmm/governance/usb', icon: Usb, label: 'Controle USB', desc: 'Eventos de dispositivos USB e políticas de bloqueio', color: 'text-orange-400', border: 'border-orange-500/30', count: stats?.usbEvents },
     { href: '/tickets/rmm/governance/web', icon: Globe, label: 'Web Filter', desc: 'Navegação web, categorias bloqueadas e logs de acesso', color: 'text-blue-400', border: 'border-blue-500/30', count: stats?.webActivities },
     { href: '/tickets/rmm/governance/drivers', icon: HardDrive, label: 'Inventário de Drivers', desc: 'Drivers instalados, atualizações disponíveis', color: 'text-purple-400', border: 'border-purple-500/30', count: stats?.drivers },
@@ -88,7 +88,7 @@ export default function GovernanceDashboard() {
       {/* Overview Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Endpoints Monitorados', value: stats?.activitySessions || 0, icon: Monitor, color: 'text-blue-400' },
+          { label: 'Endpoints Monitorados', value: stats?.endpointsMonitored || 0, icon: Monitor, color: 'text-blue-400' },
           { label: 'Eventos USB', value: stats?.usbEvents || 0, icon: Usb, color: 'text-orange-400' },
           { label: 'Máq. Web Monitor.', value: stats?.webActivities || 0, icon: Globe, color: 'text-cyan-400' },
           { label: 'Máq. Monitoradas', value: stats?.totalMachines || 0, icon: Radio, color: 'text-purple-400' },
