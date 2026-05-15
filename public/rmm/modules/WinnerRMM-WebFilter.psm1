@@ -1,50 +1,315 @@
 # ============================================
 # Modulo: WinnerRMM-WebFilter
-# Monitoramento de navegacao e filtro de URLs
+# Monitoramento de navegacao REAL e filtro de URLs
 # Winner Tecnologia - Agente v2.0
+# ============================================
+# Captura historico REAL dos navegadores (Chrome, Edge, Brave, Firefox, Opera)
+# via leitura direta do banco SQLite de historico de cada browser.
+# Fallback: UI Automation para aba ativa + titulos de janela.
+# NAO usa dns-cache (gera ruido, nao reflete navegacao real do usuario).
 # ============================================
 
 $ErrorActionPreference = "SilentlyContinue"
 
 $script:WebFilterCache = @{}
 $script:CacheExpiry = (Get-Date)
+$script:SqliteToolPath = $null
 
-function Get-BrowserHistory {
-    param([int]$Minutes = 5)
-    
+# ============ SQLITE3.EXE TOOL ============
+
+function Ensure-SqliteTool {
+    <#
+    .SYNOPSIS
+        Garante que sqlite3.exe esta disponivel localmente para leitura de historico.
+        Baixa da API RMM na primeira execucao e cacheia em C:\ProgramData\WinnerRMM\tools\.
+    #>
+    param([string]$ApiUrl = "")
+
+    $toolDir = "C:\ProgramData\WinnerRMM\tools"
+    $toolPath = "$toolDir\sqlite3.exe"
+
+    # Ja cacheado nesta sessao?
+    if ($script:SqliteToolPath -and (Test-Path $script:SqliteToolPath)) {
+        return $script:SqliteToolPath
+    }
+
+    # Ja existe no disco?
+    if (Test-Path $toolPath) {
+        $script:SqliteToolPath = $toolPath
+        return $toolPath
+    }
+
+    # Verificar se esta no PATH do sistema
+    $inPath = Get-Command "sqlite3" -ErrorAction SilentlyContinue
+    if ($inPath) {
+        $script:SqliteToolPath = $inPath.Source
+        return $inPath.Source
+    }
+
+    # Baixar da API RMM (confiavel, mesmo servidor do agente)
+    if ($ApiUrl) {
+        try {
+            if (-not (Test-Path $toolDir)) { New-Item -ItemType Directory -Path $toolDir -Force | Out-Null }
+            $downloadUrl = "$ApiUrl/rmm/tools/sqlite3.exe"
+            Write-Log "[WebFilter] Downloading sqlite3.exe from $downloadUrl"
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $toolPath -UseBasicParsing -TimeoutSec 60
+            if (Test-Path $toolPath) {
+                $script:SqliteToolPath = $toolPath
+                Write-Log "[WebFilter] sqlite3.exe downloaded OK ($((Get-Item $toolPath).Length / 1MB)MB)"
+                return $toolPath
+            }
+        } catch {
+            Write-Log "[WebFilter] Failed to download sqlite3.exe: $($_.Exception.Message)"
+        }
+    }
+
+    return $null
+}
+
+# ============ LEITURA DE HISTORICO VIA SQLITE ============
+
+function Read-ChromiumHistory {
+    <#
+    .SYNOPSIS
+        Le o historico de navegacao de browsers Chromium (Chrome, Edge, Brave, Opera)
+        via sqlite3.exe lendo o arquivo History de cada perfil.
+    #>
+    param(
+        [string]$SqlitePath,
+        [int]$Minutes = 10
+    )
+
+    $results = @()
+    $cutoffDate = (Get-Date).AddMinutes(-$Minutes).ToUniversalTime()
+    # Chromium armazena timestamps como microsegundos desde 01/01/1601 (WebKit/FILETIME)
+    $cutoffChromium = [long]($cutoffDate.ToFileTimeUtc() / 10)
+
+    # Paths dos browsers Chromium por perfil de usuario
+    $userDirs = Get-ChildItem "C:\Users" -Directory -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -notin @("Public", "Default", "Default User", "All Users")
+    }
+
+    $browserDefs = @(
+        @{ Name = "chrome";  BasePath = "AppData\Local\Google\Chrome\User Data" }
+        @{ Name = "msedge";  BasePath = "AppData\Local\Microsoft\Edge\User Data" }
+        @{ Name = "brave";   BasePath = "AppData\Local\BraveSoftware\Brave-Browser\User Data" }
+        @{ Name = "opera";   BasePath = "AppData\Roaming\Opera Software\Opera Stable" }
+    )
+
+    foreach ($userDir in $userDirs) {
+        $username = $userDir.Name
+
+        foreach ($bDef in $browserDefs) {
+            $browserBase = Join-Path $userDir.FullName $bDef.BasePath
+            if (-not (Test-Path $browserBase)) { continue }
+
+            # Encontrar todos os perfis (Default, Profile 1, Profile 2, etc.)
+            $profileDirs = @()
+            if ($bDef.Name -eq "opera") {
+                # Opera: historico fica direto na pasta raiz
+                $profileDirs += $browserBase
+            } else {
+                $profileDirs += Get-ChildItem $browserBase -Directory -ErrorAction SilentlyContinue | Where-Object {
+                    $_.Name -eq "Default" -or $_.Name -match "^Profile \d+"
+                } | ForEach-Object { $_.FullName }
+            }
+
+            foreach ($profPath in $profileDirs) {
+                $historyFile = Join-Path $profPath "History"
+                if (-not (Test-Path $historyFile)) { continue }
+
+                # Copiar para temp (browser trava o arquivo)
+                $tempDb = "$env:TEMP\wrm_hist_$($bDef.Name)_$(Get-Random).sqlite"
+                try {
+                    [System.IO.File]::Copy($historyFile, $tempDb, $true)
+                } catch {
+                    continue
+                }
+
+                try {
+                    # Query: pegar URLs visitadas nos ultimos N minutos
+                    $query = "SELECT url, title, last_visit_time, visit_count FROM urls WHERE last_visit_time > $cutoffChromium ORDER BY last_visit_time DESC LIMIT 200;"
+                    $output = & $SqlitePath $tempDb $query 2>$null
+
+                    if ($output) {
+                        foreach ($line in $output) {
+                            if (-not $line -or $line.Trim().Length -eq 0) { continue }
+                            $parts = $line -split '\|'
+                            if ($parts.Count -lt 3) { continue }
+
+                            $url = $parts[0]
+                            $title = $parts[1]
+                            $chromiumTime = [long]$parts[2]
+
+                            # Ignorar URLs internas do browser
+                            if ($url -match '^(chrome|edge|brave|opera|about|chrome-extension|devtools):') { continue }
+                            if ($url -match '^(file://|data:)') { continue }
+
+                            # Converter timestamp Chromium para DateTime
+                            $visitedAt = try {
+                                [DateTime]::FromFileTimeUtc($chromiumTime * 10).ToString("o")
+                            } catch {
+                                (Get-Date).ToUniversalTime().ToString("o")
+                            }
+
+                            # Extrair dominio
+                            $domain = ""
+                            try {
+                                $uri = [System.Uri]::new($url)
+                                $domain = $uri.Host
+                            } catch {}
+
+                            $results += @{
+                                url            = $url
+                                domain         = $domain
+                                title          = $title
+                                timestamp      = $visitedAt
+                                browser        = $bDef.Name
+                                durationSeconds = 0
+                                username       = $username
+                            }
+                        }
+                    }
+                } catch {
+                    Write-Log "[WebFilter] Error reading $($bDef.Name) history for $username : $($_.Exception.Message)"
+                } finally {
+                    Remove-Item $tempDb -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
+
+    return $results
+}
+
+function Read-FirefoxHistory {
+    <#
+    .SYNOPSIS
+        Le o historico de navegacao do Firefox via sqlite3.exe
+        lendo o arquivo places.sqlite de cada perfil.
+    #>
+    param(
+        [string]$SqlitePath,
+        [int]$Minutes = 10
+    )
+
+    $results = @()
+    $cutoffDate = (Get-Date).AddMinutes(-$Minutes).ToUniversalTime()
+    # Firefox armazena timestamps como microsegundos desde Unix epoch (01/01/1970)
+    $epoch = [datetime]"1970-01-01T00:00:00Z"
+    $cutoffFirefox = [long](($cutoffDate - $epoch).TotalSeconds * 1000000)
+
+    $userDirs = Get-ChildItem "C:\Users" -Directory -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -notin @("Public", "Default", "Default User", "All Users")
+    }
+
+    foreach ($userDir in $userDirs) {
+        $username = $userDir.Name
+        $ffProfilePath = Join-Path $userDir.FullName "AppData\Roaming\Mozilla\Firefox\Profiles"
+        if (-not (Test-Path $ffProfilePath)) { continue }
+
+        $ffProfiles = Get-ChildItem $ffProfilePath -Directory -ErrorAction SilentlyContinue
+        foreach ($ffProf in $ffProfiles) {
+            $placesFile = Join-Path $ffProf.FullName "places.sqlite"
+            if (-not (Test-Path $placesFile)) { continue }
+
+            $tempDb = "$env:TEMP\wrm_ff_hist_$(Get-Random).sqlite"
+            try {
+                [System.IO.File]::Copy($placesFile, $tempDb, $true)
+            } catch {
+                continue
+            }
+
+            try {
+                $query = "SELECT p.url, p.title, p.last_visit_date, p.visit_count FROM moz_places p WHERE p.last_visit_date > $cutoffFirefox AND p.url NOT LIKE 'about:%' AND p.url NOT LIKE 'moz-%' AND p.url NOT LIKE 'file:%' ORDER BY p.last_visit_date DESC LIMIT 200;"
+                $output = & $SqlitePath $tempDb $query 2>$null
+
+                if ($output) {
+                    foreach ($line in $output) {
+                        if (-not $line -or $line.Trim().Length -eq 0) { continue }
+                        $parts = $line -split '\|'
+                        if ($parts.Count -lt 3) { continue }
+
+                        $url = $parts[0]
+                        $title = $parts[1]
+                        $ffTime = [long]$parts[2]
+
+                        # Converter timestamp Firefox para DateTime
+                        $visitedAt = try {
+                            $epoch.AddSeconds($ffTime / 1000000).ToString("o")
+                        } catch {
+                            (Get-Date).ToUniversalTime().ToString("o")
+                        }
+
+                        $domain = ""
+                        try {
+                            $uri = [System.Uri]::new($url)
+                            $domain = $uri.Host
+                        } catch {}
+
+                        $results += @{
+                            url            = $url
+                            domain         = $domain
+                            title          = $title
+                            timestamp      = $visitedAt
+                            browser        = "firefox"
+                            durationSeconds = 0
+                            username       = $username
+                        }
+                    }
+                }
+            } catch {
+                Write-Log "[WebFilter] Error reading Firefox history for $username : $($_.Exception.Message)"
+            } finally {
+                Remove-Item $tempDb -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    return $results
+}
+
+# ============ FALLBACK: UI AUTOMATION + WINDOW TITLES ============
+
+function Get-BrowserWindowTitles {
+    <#
+    .SYNOPSIS
+        Fallback: captura titulos das janelas de browsers abertos.
+        Menos preciso que leitura do DB, mas funciona sem sqlite3.
+    #>
+    param()
+
     $urls = @()
     $now = Get-Date
-    
-    # Metodo 1: Capturar titulos de janelas de browsers abertos
-    # Isso pega todas as abas/janelas ativas dos navegadores
+    $user = $env:USERNAME
+
     $browserProcesses = @("chrome", "msedge", "firefox", "brave", "opera", "iexplore")
     foreach ($browserName in $browserProcesses) {
         $procs = Get-Process -Name $browserName -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -ne "" }
         foreach ($p in $procs) {
             $windowTitle = $p.MainWindowTitle
             if ($windowTitle -and $windowTitle.Length -gt 2) {
-                # Extrair titulo da pagina (remover " - Google Chrome", " - Microsoft Edge", etc)
                 $pageTitle = $windowTitle -replace '\s*[-\x{2013}\x{2014}]\s*(Google Chrome|Microsoft Edge|Mozilla Firefox|Brave|Opera|Internet Explorer)$', ''
-                
-                # Tentar extrair dominio do titulo se possivel
+
                 $domain = ""
                 if ($pageTitle -match '([\w\-]+\.\w{2,})') {
                     $domain = $Matches[1]
                 }
-                
+
                 $urls += @{
-                    url = ""
-                    domain = $domain
-                    title = $pageTitle.Trim()
-                    timestamp = $now.ToUniversalTime().ToString("o")
-                    browser = $browserName
+                    url            = if ($domain) { "https://$domain" } else { "" }
+                    domain         = $domain
+                    title          = $pageTitle.Trim()
+                    timestamp      = $now.ToUniversalTime().ToString("o")
+                    browser        = $browserName
                     durationSeconds = 0
+                    username       = $user
                 }
             }
         }
     }
-    
-    # Metodo 2: Acessibilidade — obter URLs das abas via UI Automation (quando disponivel)
+
+    # Tentar UI Automation para obter URL real da aba ativa (Chrome/Edge)
     try {
         Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
         foreach ($browserName in @("chrome", "msedge")) {
@@ -52,38 +317,35 @@ function Get-BrowserHistory {
             foreach ($p in $procs) {
                 try {
                     $element = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
-                    # Buscar barra de enderecos (Edit control)
                     $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
                     $editElement = $element.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
                     if ($editElement) {
                         $valuePattern = $editElement.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
                         $currentUrl = $valuePattern.Current.Value
                         if ($currentUrl -and $currentUrl -match '[\w\-]+\.\w{2,}') {
-                            # Completar URL se faltou protocolo
                             if ($currentUrl -notmatch '^https?://') { $currentUrl = "https://$currentUrl" }
-                            try {
-                                $uri = [System.Uri]::new($currentUrl)
-                                $domain = $uri.Host
-                            } catch { $domain = "" }
-                            
-                            # Atualizar ou adicionar URL
-                            $existingIdx = -1
+                            $domain = ""
+                            try { $domain = ([System.Uri]::new($currentUrl)).Host } catch {}
+
+                            # Atualizar entry existente ou adicionar nova
+                            $updated = $false
                             for ($i = 0; $i -lt $urls.Count; $i++) {
-                                if ($urls[$i].browser -eq $browserName -and $urls[$i].title -eq $p.MainWindowTitle.Trim()) {
-                                    $existingIdx = $i; break
+                                if ($urls[$i].browser -eq $browserName -and (-not $urls[$i].url -or $urls[$i].url -eq "" -or $urls[$i].url -eq "https://$($urls[$i].domain)")) {
+                                    $urls[$i].url = $currentUrl
+                                    $urls[$i].domain = $domain
+                                    $updated = $true
+                                    break
                                 }
                             }
-                            if ($existingIdx -ge 0) {
-                                $urls[$existingIdx].url = $currentUrl
-                                $urls[$existingIdx].domain = $domain
-                            } else {
+                            if (-not $updated) {
                                 $urls += @{
-                                    url = $currentUrl
-                                    domain = $domain
-                                    title = $p.MainWindowTitle -replace '\s*[-\x{2013}\x{2014}]\s*(Google Chrome|Microsoft Edge)$', ''
-                                    timestamp = $now.ToUniversalTime().ToString("o")
-                                    browser = $browserName
+                                    url            = $currentUrl
+                                    domain         = $domain
+                                    title          = $p.MainWindowTitle -replace '\s*[-\x{2013}\x{2014}]\s*(Google Chrome|Microsoft Edge)$', ''
+                                    timestamp      = $now.ToUniversalTime().ToString("o")
+                                    browser        = $browserName
                                     durationSeconds = 0
+                                    username       = $user
                                 }
                             }
                         }
@@ -92,33 +354,78 @@ function Get-BrowserHistory {
             }
         }
     } catch {
-        # UIAutomation nao disponivel, continuar com titulos
+        # UIAutomation nao disponivel — manter apenas titulos
     }
-    
-    # Metodo 3: DNS cache como fallback
-    $dnsCache = Get-DnsClientCache -ErrorAction SilentlyContinue | Where-Object {
-        $_.Entry -notmatch "(microsoft|windows|msftncsi|office|live|windowsupdate|bing\.com|login\.)" -and
-        $_.Entry -match "\." -and
-        $_.Status -eq 0
-    } | Select-Object -First 50
-    
-    foreach ($entry in $dnsCache) {
-        # Evitar duplicatas
-        $alreadyHave = $urls | Where-Object { $_.domain -eq $entry.Entry }
-        if (-not $alreadyHave) {
-            $urls += @{
-                url = "https://$($entry.Entry)"
-                domain = $entry.Entry
-                title = ""
-                timestamp = $now.ToUniversalTime().ToString("o")
-                browser = "dns-cache"
-                durationSeconds = 0
-            }
-        }
-    }
-    
+
     return $urls
 }
+
+# ============ FUNCAO PRINCIPAL DE COLETA ============
+
+function Get-BrowserHistory {
+    <#
+    .SYNOPSIS
+        Coleta historico de navegacao REAL dos browsers instalados.
+        Prioridade: SQLite DB > UI Automation > Window titles.
+        NAO usa dns-cache.
+    #>
+    param(
+        [int]$Minutes = 10,
+        [string]$ApiUrl = ""
+    )
+
+    $allUrls = @()
+    $sqlitePath = Ensure-SqliteTool -ApiUrl $ApiUrl
+
+    if ($sqlitePath) {
+        # ===== METODO PRIMARIO: Leitura direta do banco SQLite do browser =====
+        Write-Log "[WebFilter] Reading browser history databases via sqlite3..."
+
+        $chromiumUrls = Read-ChromiumHistory -SqlitePath $sqlitePath -Minutes $Minutes
+        if ($chromiumUrls.Count -gt 0) {
+            $allUrls += $chromiumUrls
+            Write-Log "[WebFilter] Chromium history: $($chromiumUrls.Count) URLs"
+        }
+
+        $firefoxUrls = Read-FirefoxHistory -SqlitePath $sqlitePath -Minutes $Minutes
+        if ($firefoxUrls.Count -gt 0) {
+            $allUrls += $firefoxUrls
+            Write-Log "[WebFilter] Firefox history: $($firefoxUrls.Count) URLs"
+        }
+    } else {
+        Write-Log "[WebFilter] sqlite3.exe not available, using fallback methods"
+    }
+
+    # ===== METODO FALLBACK: Window titles + UI Automation =====
+    # Sempre executa para capturar aba ativa em tempo real (complementa o DB)
+    $windowUrls = Get-BrowserWindowTitles
+    foreach ($wu in $windowUrls) {
+        # Adicionar apenas se nao duplicado
+        $isDuplicate = $allUrls | Where-Object {
+            ($_.url -and $wu.url -and $_.url -eq $wu.url) -or
+            ($_.title -and $wu.title -and $_.title -eq $wu.title -and $_.browser -eq $wu.browser)
+        }
+        if (-not $isDuplicate -and ($wu.url -or $wu.title)) {
+            $allUrls += $wu
+        }
+    }
+
+    # Deduplicar por URL (manter o mais recente)
+    $seen = @{}
+    $dedupUrls = @()
+    foreach ($u in $allUrls) {
+        $key = if ($u.url -and $u.url.Length -gt 5) { $u.url } else { "$($u.browser):$($u.title)" }
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $dedupUrls += $u
+        }
+    }
+
+    Write-Log "[WebFilter] Total unique URLs collected: $($dedupUrls.Count)"
+    return $dedupUrls
+}
+
+# ============ URL FILTER CHECK ============
 
 function Test-UrlAllowed {
     param(
@@ -127,25 +434,27 @@ function Test-UrlAllowed {
         [string]$MachineId,
         [string]$Url
     )
-    
+
     try {
         $domain = ([System.Uri]$Url).Host
-        
+
         # Cache local (5 minutos)
         if ($script:WebFilterCache.ContainsKey($domain) -and (Get-Date) -lt $script:CacheExpiry) {
             return $script:WebFilterCache[$domain]
         }
-        
+
         $res = Invoke-RestMethod -Uri "$ApiUrl/api/rmm/webfilter/check?token=$Token&machineId=$MachineId&url=$([System.Web.HttpUtility]::UrlEncode($Url))" -Method GET -TimeoutSec 5
-        
+
         $script:WebFilterCache[$domain] = $res
         $script:CacheExpiry = (Get-Date).AddMinutes(5)
-        
+
         return $res
     } catch {
         return @{ action = "allow" }  # Fail-open
     }
 }
+
+# ============ ENVIO PARA API ============
 
 function Send-WebActivity {
     param(
@@ -153,16 +462,17 @@ function Send-WebActivity {
         [string]$Token,
         [string]$Hostname
     )
-    
+
     try {
         $user = (Get-WmiObject Win32_ComputerSystem).UserName
-        $urls = Get-BrowserHistory -Minutes 5
-        
+        if (-not $user) { $user = $env:USERNAME }
+        $urls = Get-BrowserHistory -Minutes 10 -ApiUrl $ApiUrl
+
         if ($urls.Count -eq 0) { return }
-        
+
         $activities = @()
         foreach ($u in $urls) {
-            # Verificar filtro de URL (bloquear ou permitir)
+            # Verificar filtro de URL
             $isBlocked = $false
             if ($u.url -and $u.url.Length -gt 5) {
                 try {
@@ -170,27 +480,27 @@ function Send-WebActivity {
                     if ($check.action -eq "blocked") { $isBlocked = $true }
                 } catch {}
             }
-            
+
             $activities += @{
-                url = if ($u.url) { $u.url } else { "https://$($u.domain)" }
-                domain = $u.domain
-                page_title = $u.title
-                browser = $u.browser
+                url              = if ($u.url) { $u.url } else { "https://$($u.domain)" }
+                domain           = $u.domain
+                page_title       = $u.title
+                browser          = $u.browser
                 duration_seconds = $u.durationSeconds
-                visited_at = $u.timestamp
-                username = $user
-                is_blocked = $isBlocked
+                visited_at       = $u.timestamp
+                username         = if ($u.username) { $u.username } else { $user }
+                is_blocked       = $isBlocked
             }
         }
-        
+
         $body = @{
-            token = $Token
-            hostname = $Hostname
+            token      = $Token
+            hostname   = $Hostname
             activities = $activities
         } | ConvertTo-Json -Depth 5
-        
-        Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/web-activity" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 15
-        Write-Log "[WebFilter] Sent $($activities.Count) web activities (browser + duration included)"
+
+        Invoke-RestMethod -Uri "$ApiUrl/api/rmm/governance/web-activity" -Method POST -Body $body -ContentType "application/json; charset=utf-8" -TimeoutSec 15
+        Write-Log "[WebFilter] Sent $($activities.Count) REAL web activities (browsers: $(($activities | ForEach-Object { $_.browser } | Sort-Object -Unique) -join ', '))"
     } catch {
         Write-Log "[WebFilter] Error: $($_.Exception.Message)"
     }
@@ -202,42 +512,41 @@ function Send-WebFilterLogs {
         [string]$Token,
         [string]$Hostname
     )
-    
+
     try {
         $user = (Get-WmiObject Win32_ComputerSystem).UserName
-        $urls = Get-BrowserHistory -Minutes 5
-        
+        if (-not $user) { $user = $env:USERNAME }
+        $urls = Get-BrowserHistory -Minutes 10 -ApiUrl $ApiUrl
+
         if ($urls.Count -eq 0) { return }
-        
+
         $logs = @()
         foreach ($u in $urls) {
-            # Apenas verificar URLs validas
             $urlToCheck = if ($u.url -and $u.url.Length -gt 5) { $u.url } else { "https://$($u.domain)" }
             $check = @{ action = "allowed"; reason = ""; matched_rule = "" }
             try {
                 $check = Test-UrlAllowed -ApiUrl $ApiUrl -Token $Token -MachineId $Hostname -Url $urlToCheck
             } catch {}
-            
+
             $logs += @{
-                url = $urlToCheck
-                domain = $u.domain
-                action = if ($check.action -eq "blocked") { "blocked" } else { "allowed" }
-                reason = if ($check.reason) { $check.reason } else { $null }
+                url          = $urlToCheck
+                domain       = $u.domain
+                action       = if ($check.action -eq "blocked") { "blocked" } else { "allowed" }
+                reason       = if ($check.reason) { $check.reason } else { $null }
                 matched_rule = if ($check.matched_rule) { $check.matched_rule } else { $null }
-                username = $user
-                event_at = $u.timestamp
+                username     = if ($u.username) { $u.username } else { $user }
+                event_at     = $u.timestamp
             }
         }
-        
-        # Enviar todos os logs (incluindo bloqueados e permitidos)
+
         $body = @{
             token = $Token
             hostname = $Hostname
-            logs = $logs
+            logs  = $logs
         } | ConvertTo-Json -Depth 5
-        
-        Invoke-RestMethod -Uri "$ApiUrl/api/rmm/webfilter/logs" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 15
-        
+
+        Invoke-RestMethod -Uri "$ApiUrl/api/rmm/webfilter/logs" -Method POST -Body $body -ContentType "application/json; charset=utf-8" -TimeoutSec 15
+
         $blockedCount = ($logs | Where-Object { $_.action -eq "blocked" }).Count
         Write-Log "[WebFilter] Sent $($logs.Count) filter logs ($blockedCount blocked)"
     } catch {
@@ -245,4 +554,5 @@ function Send-WebFilterLogs {
     }
 }
 
+# ============ EXPORTAR ============
 Export-ModuleMember -Function Get-BrowserHistory, Test-UrlAllowed, Send-WebActivity, Send-WebFilterLogs
