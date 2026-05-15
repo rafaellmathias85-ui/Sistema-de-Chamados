@@ -21,7 +21,15 @@ $ErrorActionPreference = "SilentlyContinue"
 $API_URL = "${apiUrl}"
 $COMPANY_TOKEN = "${companyToken}"
 $CHECKIN_INTERVAL = 60
+$GOVERNANCE_INTERVAL = 300     # 5 min
+$DRIVER_SCAN_INTERVAL = 86400  # 24h
+$DISK_HEALTH_INTERVAL = 3600   # 1h
+$NETWORK_DIAG_INTERVAL = 300   # 5 min
 # ===========================================
+
+$InstallDir = "C:\\ProgramData\\WinnerRMM"
+$ModulesDir = "$InstallDir\\modules"
+New-Item -Path $ModulesDir -ItemType Directory -Force | Out-Null
 
 # Forcar TLS 1.2+ (obrigatorio para HTTPS em servidores com certificado moderno)
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13 } catch {
@@ -694,12 +702,62 @@ function Collect-SecurityEvents($machineId) {
     }
 }
 
+# === Governance: Download e Import de Modulos ===
+# Derivar URL base (remover /api/rmm do $API_URL)
+$BASE_URL = $API_URL -replace '/api/rmm$', ''
+
+function Update-GovernanceModules {
+    $moduleFiles = @(
+        "WinnerRMM-Governance.psm1",
+        "WinnerRMM-WebFilter.psm1",
+        "WinnerRMM-Relay.psm1",
+        "WinnerRMM-Update.psm1",
+        "WinnerRMM-PolicyEngine.psm1",
+        "WinnerRMM-DiskHealth.psm1",
+        "WinnerRMM-NetworkDiag.psm1"
+    )
+    foreach ($mod in $moduleFiles) {
+        $localPath = "$ModulesDir\\$mod"
+        $remoteUrl = "$BASE_URL/rmm/modules/$mod"
+        try {
+            Invoke-WebRequest -Uri $remoteUrl -OutFile $localPath -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+            Write-Log "[Modules] Downloaded: $mod"
+        } catch {
+            Write-Log "[Modules] Failed $mod : $($_.Exception.Message)"
+        }
+    }
+}
+
+function Import-GovernanceModules {
+    $mods = Get-ChildItem -Path $ModulesDir -Filter "*.psm1" -ErrorAction SilentlyContinue
+    foreach ($m in $mods) {
+        try {
+            Import-Module $m.FullName -Force -Global -DisableNameChecking
+            Write-Log "[Modules] Imported: $($m.Name)"
+        } catch {
+            Write-Log "[Modules] Error importing $($m.Name): $($_.Exception.Message)"
+        }
+    }
+}
+
 # === Loop Principal ===
 Write-Log "Agente RMM iniciado - Token: $($COMPANY_TOKEN.Substring(0,8))..."
 Write-Log "API URL: $API_URL"
+Write-Log "Base URL: $BASE_URL"
 $machineId = $null
 $loopCount = 0
 $consecutiveFailures = 0
+
+# Download inicial dos modulos de governance
+Write-Log "[Modules] Downloading governance modules..."
+Update-GovernanceModules
+Import-GovernanceModules
+
+$lastGovernanceRun = (Get-Date).AddSeconds(-$GOVERNANCE_INTERVAL)
+$lastDriverScan = (Get-Date).AddSeconds(-$DRIVER_SCAN_INTERVAL)
+$lastDiskHealthScan = (Get-Date).AddSeconds(-$DISK_HEALTH_INTERVAL)
+$lastNetworkDiagScan = (Get-Date).AddSeconds(-$NETWORK_DIAG_INTERVAL)
+$lastModuleUpdate = Get-Date
 
 # Forcar TLS 1.2 (necessario para HTTPS em VPS com certificado moderno)
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
@@ -723,7 +781,71 @@ while ($true) {
             }
             # Coletar eventos de seguranca a cada 1 minuto
             Collect-SecurityEvents $machineId
+
+            # ====== GOVERNANCE (a cada $GOVERNANCE_INTERVAL) ======
+            if (((Get-Date) - $lastGovernanceRun).TotalSeconds -ge $GOVERNANCE_INTERVAL) {
+                Write-Log "[Governance] Running governance collection..."
+                # Atividade do endpoint
+                if (Get-Command Send-ActivitySession -ErrorAction SilentlyContinue) {
+                    Send-ActivitySession -ApiUrl $BASE_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                }
+                # Eventos USB
+                if (Get-Command Send-UsbEvents -ErrorAction SilentlyContinue) {
+                    Send-UsbEvents -ApiUrl $BASE_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                }
+                # Web Activity + Web Filter logs
+                if (Get-Command Send-WebActivity -ErrorAction SilentlyContinue) {
+                    Send-WebActivity -ApiUrl $BASE_URL -Token $COMPANY_TOKEN -Hostname $env:COMPUTERNAME
+                }
+                if (Get-Command Send-WebFilterLogs -ErrorAction SilentlyContinue) {
+                    Send-WebFilterLogs -ApiUrl $BASE_URL -Token $COMPANY_TOKEN -Hostname $env:COMPUTERNAME
+                }
+                # Enforce politicas
+                if (Get-Command Enforce-UsbPolicies -ErrorAction SilentlyContinue) {
+                    Enforce-UsbPolicies -ApiUrl $BASE_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                }
+                if (Get-Command Enforce-ProductivityPolicies -ErrorAction SilentlyContinue) {
+                    Enforce-ProductivityPolicies -ApiUrl $BASE_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                }
+                $lastGovernanceRun = Get-Date
+            }
+
+            # ====== DRIVER SCAN (a cada $DRIVER_SCAN_INTERVAL) ======
+            if (((Get-Date) - $lastDriverScan).TotalSeconds -ge $DRIVER_SCAN_INTERVAL) {
+                if (Get-Command Send-DriverInventory -ErrorAction SilentlyContinue) {
+                    Write-Log "[Governance] Running driver inventory..."
+                    Send-DriverInventory -ApiUrl $BASE_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                }
+                $lastDriverScan = Get-Date
+            }
+
+            # ====== DISK HEALTH (a cada $DISK_HEALTH_INTERVAL) ======
+            if (((Get-Date) - $lastDiskHealthScan).TotalSeconds -ge $DISK_HEALTH_INTERVAL) {
+                if (Get-Command Send-DiskHealth -ErrorAction SilentlyContinue) {
+                    Write-Log "[Governance] Running disk health scan..."
+                    Send-DiskHealth -ApiUrl $BASE_URL -Token $COMPANY_TOKEN -MachineId $machineId
+                }
+                $lastDiskHealthScan = Get-Date
+            }
+
+            # ====== NETWORK DIAGNOSTICS (a cada $NETWORK_DIAG_INTERVAL) ======
+            if (((Get-Date) - $lastNetworkDiagScan).TotalSeconds -ge $NETWORK_DIAG_INTERVAL) {
+                if (Get-Command Send-NetworkDiagData -ErrorAction SilentlyContinue) {
+                    Write-Log "[Governance] Running network diagnostics..."
+                    Send-NetworkDiagData -ApiUrl $BASE_URL -Token $COMPANY_TOKEN -Hostname $env:COMPUTERNAME
+                }
+                $lastNetworkDiagScan = Get-Date
+            }
         }
+
+        # Re-download modulos a cada 1 hora (auto-update)
+        if (((Get-Date) - $lastModuleUpdate).TotalHours -ge 1) {
+            Write-Log "[Modules] Hourly module update check..."
+            Update-GovernanceModules
+            Import-GovernanceModules
+            $lastModuleUpdate = Get-Date
+        }
+
         $loopCount++
     } catch {
         $consecutiveFailures++

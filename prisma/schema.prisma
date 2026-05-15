@@ -959,11 +959,26 @@ model SnmpDevice {
   name        String
   ipAddress   String       @unique
   community   String       @default("public")
-  type        String       @default("router") // router, switch, firewall, ap, other
+  snmpVersion String       @default("2c") // 2c, 3
+  type        String       @default("router") // router, switch, firewall, ap, udm, usw, uap, other
+  vendor      String?      // unifi, mikrotik, fortinet, cisco, pfsense, tplink_omada, generic
+  model       String?      // Ex: "UDM-Pro", "USW-24-POE", "UAP-AC-Pro"
+  macAddress  String?
+  firmware    String?
+  siteName    String?      @default("default") // UniFi site name
   status      String       @default("unknown") // online, offline, unknown
   lastPoll    DateTime?
   uptimeStr   String?
   latency     Int?         // Última latência em ms
+  cpuPercent  Float?       // CPU usage %
+  memPercent  Float?       // RAM usage %
+  temperature Float?       // Temperatura °C
+  
+  // UniFi Controller Integration
+  controllerUrl     String?  // Ex: https://192.168.1.1
+  unifiApiEnabled   Boolean  @default(false)
+  controllerUser    String?  // Criptografado
+  controllerPass    String?  // Criptografado
   
   // Empresa dona do dispositivo
   companyId   String?
@@ -977,13 +992,18 @@ model SnmpDevice {
   tenantId    String?
   tenant      Tenant?      @relation(fields: [tenantId], references: [id])
   
-  metrics     SnmpMetric[]
+  metrics             SnmpMetric[]
+  networkDiagnostics  NetworkDiagnostic[]
+  wifiChannelHistory  WifiChannelHistory[]
+  switchPortHistory   SwitchPortHistory[]
+  wanHealthHistory    WanHealthHistory[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   
   @@index([tenantId])
   @@index([companyId])
   @@index([watcherMachineId])
+  @@index([vendor, type])
 }
 
 model SnmpMetric {
@@ -996,6 +1016,90 @@ model SnmpMetric {
   createdAt DateTime   @default(now())
   
   @@index([deviceId, metric, createdAt])
+}
+
+// ============================================================
+// Phase 8 - Diagnóstico de Rede UniFi/SNMP
+// ============================================================
+
+model NetworkDiagnostic {
+  id              String    @id @default(cuid())
+  deviceId        String
+  device          SnmpDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  companyId       String?
+  severity        String    // info, warning, critical
+  category        String    // wifi, switch, gateway, vlan, performance
+  diagnosticType  String    // channel_congestion, ap_overloaded, high_retry_rate, wan_packet_loss, port_errors, etc.
+  title           String
+  description     String    @db.Text
+  recommendation  String    @db.Text
+  metricValue     String?
+  thresholdValue  String?
+  isOpen          Boolean   @default(true)
+  firstSeenAt     DateTime  @default(now())
+  lastSeenAt      DateTime  @default(now())
+  resolvedAt      DateTime?
+  resolvedBy      String?
+  resolution      String?   @db.Text
+  
+  @@index([deviceId, isOpen])
+  @@index([companyId, isOpen, severity])
+  @@index([diagnosticType, isOpen])
+}
+
+model WifiChannelHistory {
+  id              String    @id @default(cuid())
+  deviceId        String
+  device          SnmpDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  radio           String    // 2g, 5g, 6g
+  channel         Int?
+  channelWidth    Int?      // 20, 40, 80, 160
+  txPower         Int?      // dBm
+  utilization     Float?    // % channel utilization
+  noiseFloor      Int?      // dBm
+  clientsCount    Int?
+  retryRate       Float?    // %
+  satisfaction    Int?      // 0-100
+  collectedAt     DateTime  @default(now())
+  
+  @@index([deviceId, radio, collectedAt(sort: Desc)])
+}
+
+model SwitchPortHistory {
+  id          String    @id @default(cuid())
+  deviceId    String
+  device      SnmpDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  portIdx     Int
+  portName    String?
+  isUp        Boolean?
+  speedMbps   Int?
+  vlanId      Int?
+  poeWatts    Float?
+  rxBytes     BigInt?
+  txBytes     BigInt?
+  rxErrors    BigInt?
+  txErrors    BigInt?
+  collectedAt DateTime  @default(now())
+  
+  @@index([deviceId, portIdx, collectedAt(sort: Desc)])
+}
+
+model WanHealthHistory {
+  id              String    @id @default(cuid())
+  deviceId        String
+  device          SnmpDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  wanInterface    String    // wan1, wan2
+  latencyMs       Float?
+  jitterMs        Float?
+  packetLossPct   Float?
+  rxMbps          Float?
+  txMbps          Float?
+  ispName         String?
+  publicIp        String?
+  isPrimary       Boolean   @default(true)
+  collectedAt     DateTime  @default(now())
+  
+  @@index([deviceId, wanInterface, collectedAt(sort: Desc)])
 }
 
 // ============================================================

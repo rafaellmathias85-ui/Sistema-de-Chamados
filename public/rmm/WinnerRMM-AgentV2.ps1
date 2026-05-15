@@ -16,6 +16,7 @@ $CHECKIN_INTERVAL = 60         # segundos entre check-ins
 $GOVERNANCE_INTERVAL = 300     # segundos entre coletas governance (5min)
 $DRIVER_SCAN_INTERVAL = 86400  # segundos entre scans de drivers (24h)
 $DISK_HEALTH_INTERVAL = 3600   # segundos entre coletas disk health (1h)
+$NETWORK_DIAG_INTERVAL = 300   # segundos entre coletas network diag (5min)
 # ========================================================
 
 $InstallDir = "C:\ProgramData\WinnerRMM"
@@ -52,7 +53,8 @@ function Update-Modules {
         "WinnerRMM-Relay.psm1",
         "WinnerRMM-Update.psm1",
         "WinnerRMM-PolicyEngine.psm1",
-        "WinnerRMM-DiskHealth.psm1"
+        "WinnerRMM-DiskHealth.psm1",
+        "WinnerRMM-NetworkDiag.psm1"
     )
     
     foreach ($mod in $moduleFiles) {
@@ -107,6 +109,7 @@ Import-AllModules
 $lastGovernanceRun = (Get-Date).AddSeconds(-$GOVERNANCE_INTERVAL)
 $lastDriverScan = (Get-Date).AddSeconds(-$DRIVER_SCAN_INTERVAL)
 $lastDiskHealthScan = (Get-Date).AddSeconds(-$DISK_HEALTH_INTERVAL)
+$lastNetworkDiagScan = (Get-Date).AddSeconds(-$NETWORK_DIAG_INTERVAL)
 $lastUpdateCheck = (Get-Date).AddHours(-1)
 $machineId = Get-StoredMachineId
 
@@ -216,6 +219,15 @@ while ($true) {
                 Send-DiskHealth -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
             }
             $lastDiskHealthScan = Get-Date
+        }
+        
+        # ====== NETWORK DIAGNOSTICS (a cada $NETWORK_DIAG_INTERVAL) ======
+        if (((Get-Date) - $lastNetworkDiagScan).TotalSeconds -ge $NETWORK_DIAG_INTERVAL) {
+            if (Get-Command Send-NetworkDiagData -ErrorAction SilentlyContinue) {
+                Write-Log "[Governance] Running network diagnostics scan..."
+                Send-NetworkDiagData -ApiUrl $API_URL -Token $COMPANY_TOKEN -Hostname $env:COMPUTERNAME
+            }
+            $lastNetworkDiagScan = Get-Date
         }
         
         # ====== UPDATE CHECK (a cada 1 hora) ======
