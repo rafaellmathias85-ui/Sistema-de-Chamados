@@ -22,11 +22,27 @@ export async function GET(request: NextRequest) {
 
     const machines = await prisma.rmmMachine.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        hostname: true,
+        username: true,
+        os: true,
+        ram: true,
+        diskModel: true,
+        diskSize: true,
+        status: true,
+        lastLogin: true,
+        lastCheckin: true,
+        ipAddress: true,
+        teamviewerId: true,
+        cpuUsage: true,
+        ramUsage: true,
+        diskUsage: true,
+        agentVersion: true,
         company: { select: { id: true, name: true } },
         _count: { select: { tasks: true } },
       },
-      orderBy: [{ status: 'asc' }, { lastCheckin: 'desc' }],
+      orderBy: [{ lastCheckin: 'desc' }],
     });
 
     // Determinar status online/offline baseado em lastCheckin

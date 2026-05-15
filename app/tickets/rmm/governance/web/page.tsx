@@ -23,6 +23,19 @@ interface WebLog {
   machine: { hostname: string; company: { name: string } };
 }
 
+interface BrowsingEntry {
+  id: string;
+  url: string;
+  domain: string;
+  pageTitle: string | null;
+  browser: string | null;
+  category: string | null;
+  durationSeconds: number | null;
+  visitedAt: string;
+  username: string | null;
+  machine: { hostname: string };
+}
+
 interface WfPolicy {
   id: string;
   name: string;
@@ -42,8 +55,9 @@ interface WfCategory {
 
 export default function WebPage() {
   const { data: session } = useSession();
-  const [tab, setTab] = useState<'logs' | 'policies' | 'categories'>('logs');
+  const [tab, setTab] = useState<'browsing' | 'logs' | 'policies' | 'categories'>('browsing');
   const [logs, setLogs] = useState<WebLog[]>([]);
+  const [browsing, setBrowsing] = useState<BrowsingEntry[]>([]);
   const [policies, setPolicies] = useState<WfPolicy[]>([]);
   const [categories, setCategories] = useState<WfCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,6 +70,13 @@ export default function WebPage() {
   const [saving, setSaving] = useState(false);
   const [formType, setFormType] = useState<'policy' | 'category'>('policy');
   const [filterMachine, setFilterMachine] = useState('');
+
+  const loadBrowsing = useCallback(async () => {
+    if (!filterMachine) { setBrowsing([]); return; }
+    const params = new URLSearchParams({ limit: '200', machineId: filterMachine });
+    const res = await fetch(`/api/rmm/governance/web-activity?${params}`);
+    if (res.ok) setBrowsing(await res.json());
+  }, [filterMachine]);
 
   const loadLogs = useCallback(async () => {
     if (!filterMachine) { setLogs([]); return; }
@@ -74,8 +95,8 @@ export default function WebPage() {
 
   useEffect(() => {
     if (!session?.user) return;
-    Promise.all([loadLogs(), loadPolicies(), loadCategories()]).finally(() => setLoading(false));
-  }, [session, loadLogs, loadPolicies, loadCategories]);
+    Promise.all([loadBrowsing(), loadLogs(), loadPolicies(), loadCategories()]).finally(() => setLoading(false));
+  }, [session, loadBrowsing, loadLogs, loadPolicies, loadCategories]);
 
   const handleCreatePolicy = async () => {
     setSaving(true);
@@ -140,7 +161,7 @@ export default function WebPage() {
 
       {/* Tabs */}
       <div className="flex gap-2 border-b tm-border pb-2">
-        {([['logs', 'Logs de Navegação', Globe], ['policies', 'Políticas', Shield], ['categories', 'Categorias', Tag]] as const).map(([key, label, Icon]) => (
+        {([['browsing', 'Navegação', Globe], ['logs', 'Bloqueios', Shield], ['policies', 'Políticas', Shield], ['categories', 'Categorias', Tag]] as const).map(([key, label, Icon]) => (
           <button key={key} onClick={() => setTab(key as any)}
             className={`px-4 py-2 rounded-t-lg text-sm font-medium transition-colors flex items-center gap-2 ${
               tab === key ? 'bg-blue-600 text-white' : 'tm-text-secondary hover:bg-white/10'
@@ -152,6 +173,73 @@ export default function WebPage() {
 
       {/* Machine Filter */}
       <MachineFilter value={filterMachine} onChange={setFilterMachine} />
+
+      {/* Browsing Tab — Páginas visitadas com navegador */}
+      {tab === 'browsing' && (
+        <>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 tm-text-muted" size={16} />
+            <input type="text" placeholder="Buscar por URL, domínio, navegador..." value={search} onChange={e => setSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 tm-bg-card border tm-border rounded-lg tm-text text-sm" />
+          </div>
+          {(() => {
+            const filtered = browsing.filter(b =>
+              !search ||
+              b.url.toLowerCase().includes(search.toLowerCase()) ||
+              b.domain.toLowerCase().includes(search.toLowerCase()) ||
+              (b.browser || '').toLowerCase().includes(search.toLowerCase()) ||
+              (b.pageTitle || '').toLowerCase().includes(search.toLowerCase())
+            );
+            if (filtered.length === 0) return (
+              <div className="text-center py-20 tm-text-secondary">
+                <Globe className="mx-auto mb-3 opacity-30" size={48} />
+                <p>{!filterMachine ? 'Selecione uma máquina para ver a navegação' : 'Nenhum registro de navegação'}</p>
+              </div>
+            );
+            return (
+              <div className="tm-bg-card border tm-border rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b tm-border text-left">
+                        <th className="px-4 py-3 tm-text-secondary font-medium">QUANDO</th>
+                        <th className="px-4 py-3 tm-text-secondary font-medium">NAVEGADOR</th>
+                        <th className="px-4 py-3 tm-text-secondary font-medium">DOMÍNIO</th>
+                        <th className="px-4 py-3 tm-text-secondary font-medium">PÁGINA</th>
+                        <th className="px-4 py-3 tm-text-secondary font-medium">USUÁRIO</th>
+                        <th className="px-4 py-3 tm-text-secondary font-medium">DURAÇÃO</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.slice(0, 100).map((b, i) => (
+                        <motion.tr key={b.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.01 }}
+                          className="border-b tm-border hover:bg-white/5 transition-colors">
+                          <td className="px-4 py-2.5 tm-text-muted text-xs whitespace-nowrap">{new Date(b.visitedAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
+                          <td className="px-4 py-2.5">
+                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                              (b.browser || '').toLowerCase().includes('chrome') ? 'bg-green-600/20 text-green-400' :
+                              (b.browser || '').toLowerCase().includes('edge') ? 'bg-blue-600/20 text-blue-400' :
+                              (b.browser || '').toLowerCase().includes('firefox') ? 'bg-orange-600/20 text-orange-400' :
+                              'bg-gray-600/20 tm-text-muted'
+                            }`}>
+                              {b.browser || 'Desconhecido'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 font-mono text-xs tm-text">{b.domain}</td>
+                          <td className="px-4 py-2.5 tm-text-secondary text-xs max-w-[300px] truncate" title={b.pageTitle || b.url}>{b.pageTitle || b.url}</td>
+                          <td className="px-4 py-2.5 tm-text-secondary text-xs">{b.username || '—'}</td>
+                          <td className="px-4 py-2.5 tm-text-muted text-xs">{b.durationSeconds ? `${Math.floor(b.durationSeconds / 60)}m ${b.durationSeconds % 60}s` : '—'}</td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {filtered.length > 100 && <p className="text-center py-2 tm-text-muted text-xs">Mostrando 100 de {filtered.length} registros</p>}
+              </div>
+            );
+          })()}
+        </>
+      )}
 
       {/* Logs Tab */}
       {tab === 'logs' && (

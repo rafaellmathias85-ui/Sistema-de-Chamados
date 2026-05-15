@@ -18,6 +18,7 @@ interface GovStats {
   relayDiscovered: number;
   agentVersions: number;
   auditLogs: number;
+  totalMachines: number;
   usbBlocked: number;
   webBlocked: number;
 }
@@ -89,8 +90,8 @@ export default function GovernanceDashboard() {
         {[
           { label: 'Endpoints Monitorados', value: stats?.activitySessions || 0, icon: Monitor, color: 'text-blue-400' },
           { label: 'Eventos USB', value: stats?.usbEvents || 0, icon: Usb, color: 'text-orange-400' },
-          { label: 'URLs Monitoradas', value: stats?.webActivities || 0, icon: Globe, color: 'text-cyan-400' },
-          { label: 'Máq. Descobertas', value: stats?.relayDiscovered || 0, icon: Radio, color: 'text-purple-400' },
+          { label: 'Máq. Web Monitor.', value: stats?.webActivities || 0, icon: Globe, color: 'text-cyan-400' },
+          { label: 'Máq. Monitoradas', value: stats?.totalMachines || 0, icon: Radio, color: 'text-purple-400' },
         ].map((card, i) => (
           <motion.div
             key={i}

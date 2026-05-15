@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     const configs = await prisma.relayConfig.findMany({
       where,
       include: {
-        machine: { select: { hostname: true, status: true, ipAddress: true } },
+        machine: { select: { hostname: true, status: true, ipAddress: true, company: { select: { name: true } } } },
         company: { select: { name: true } },
         credential: { select: { name: true, username: true, credentialType: true } },
       },

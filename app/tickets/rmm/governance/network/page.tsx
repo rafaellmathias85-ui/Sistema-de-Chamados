@@ -7,7 +7,7 @@ import Link from 'next/link';
 import {
   Wifi, ChevronLeft, RefreshCw, Search, Loader2,
   AlertTriangle, CheckCircle, XCircle, Thermometer,
-  Activity, Clock, Shield, Filter, Eye,
+  Activity, Clock, Shield, Filter, Eye, Plus,
   ChevronDown, ChevronUp, X, Network, Router,
   Signal, Zap, ArrowUpDown, Radio, Monitor,
   Globe, Server, Cable, Gauge,
@@ -211,6 +211,9 @@ export default function NetworkDiagnosticsPage() {
   const [activeTab, setActiveTab] = useState<'devices' | 'diagnostics'>('devices');
   const [expandedDevice, setExpandedDevice] = useState<string | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
+  const [showAddDevice, setShowAddDevice] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', ipAddress: '', type: 'router', community: 'public', vendor: '' });
+  const [addingSaving, setAddingSaving] = useState(false);
 
   // Detail data per device
   const [wifiHistory, setWifiHistory] = useState<WifiHistory[]>([]);
@@ -224,6 +227,30 @@ export default function NetworkDiagnosticsPage() {
   const [filterCompany, setFilterCompany] = useState('');
 
   // ===== Data Loading =====
+  const handleAddDevice = async () => {
+    if (!addForm.name || !addForm.ipAddress) return;
+    setAddingSaving(true);
+    try {
+      const res = await fetch('/api/rmm/snmp/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(addForm),
+      });
+      if (res.ok) {
+        setShowAddDevice(false);
+        setAddForm({ name: '', ipAddress: '', type: 'router', community: 'public', vendor: '' });
+        loadOverview();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Erro ao adicionar dispositivo');
+      }
+    } catch {
+      alert('Erro ao adicionar dispositivo');
+    } finally {
+      setAddingSaving(false);
+    }
+  };
+
   const loadOverview = useCallback(async () => {
     setLoading(true);
     try {
@@ -353,6 +380,9 @@ export default function NetworkDiagnosticsPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setShowAddDevice(!showAddDevice)} className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition flex items-center gap-2 text-sm font-medium">
+            <Plus size={14} /> Dispositivo
+          </button>
           <button onClick={() => { loadOverview(); loadDiagnostics(); }} className="px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text hover:bg-white/10 transition flex items-center gap-2 text-sm">
             <RefreshCw size={14} /> Atualizar
           </button>
@@ -361,6 +391,53 @@ export default function NetworkDiagnosticsPage() {
           </Link>
         </div>
       </div>
+
+      {/* Add Device Form */}
+      <AnimatePresence>
+        {showAddDevice && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+            className="tm-bg-card border tm-border rounded-xl p-4 overflow-hidden">
+            <h3 className="font-semibold tm-text mb-3">Adicionar Dispositivo de Rede</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <div>
+                <label className="text-xs tm-text-secondary block mb-1">Nome</label>
+                <input type="text" value={addForm.name} onChange={e => setAddForm({ ...addForm, name: e.target.value })} placeholder="Ex: Router Principal"
+                  className="w-full px-3 py-2 tm-bg-main border tm-border rounded-lg tm-text text-sm" />
+              </div>
+              <div>
+                <label className="text-xs tm-text-secondary block mb-1">IP</label>
+                <input type="text" value={addForm.ipAddress} onChange={e => setAddForm({ ...addForm, ipAddress: e.target.value })} placeholder="192.168.1.1"
+                  className="w-full px-3 py-2 tm-bg-main border tm-border rounded-lg tm-text text-sm" />
+              </div>
+              <div>
+                <label className="text-xs tm-text-secondary block mb-1">Tipo</label>
+                <select value={addForm.type} onChange={e => setAddForm({ ...addForm, type: e.target.value })}
+                  className="w-full px-3 py-2 tm-bg-main border tm-border rounded-lg tm-text text-sm">
+                  <option value="router">Router</option>
+                  <option value="switch">Switch</option>
+                  <option value="firewall">Firewall</option>
+                  <option value="ap">Access Point</option>
+                  <option value="udm">UDM</option>
+                  <option value="usw">USW</option>
+                  <option value="uap">UAP</option>
+                  <option value="other">Outro</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs tm-text-secondary block mb-1">Community SNMP</label>
+                <input type="text" value={addForm.community} onChange={e => setAddForm({ ...addForm, community: e.target.value })} placeholder="public"
+                  className="w-full px-3 py-2 tm-bg-main border tm-border rounded-lg tm-text text-sm" />
+              </div>
+              <div className="flex items-end">
+                <button onClick={handleAddDevice} disabled={addingSaving || !addForm.name || !addForm.ipAddress}
+                  className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition">
+                  {addingSaving ? 'Salvando...' : 'Adicionar'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

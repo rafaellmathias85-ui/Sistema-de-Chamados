@@ -380,8 +380,11 @@ model RmmMachine {
   memorySlotsUsed    Int?    // Slots de memoria preenchidos
   memoryModulesJson  String? // JSON [{capacity, speed, manufacturer, slot}]
   
-  // RMM v2 - Agent Version Control (colunas movidas para schema após migração SQL no VPS)
-  // agentVersion, agentType, lastUpdateAt, updateChannel -> aguardando ALTER TABLE no VPS
+  // RMM v2 - Agent Version Control (migração SQL executada no VPS)
+  agentVersion    String?
+  agentType       String?   @default("ps1")
+  lastUpdateAt    DateTime?
+  updateChannel   String?   @default("stable")
   
   companyId   String
   company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)

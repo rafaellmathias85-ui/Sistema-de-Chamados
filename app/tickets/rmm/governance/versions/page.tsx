@@ -28,11 +28,13 @@ interface AgentVersion {
 export default function VersionsPage() {
   const { data: session } = useSession();
   const [versions, setVersions] = useState<AgentVersion[]>([]);
+  const [companies, setCompanies] = useState<{ id: string; name: string; rmmToken: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushResult, setPushResult] = useState<string | null>(null);
+  const [pushCompanyId, setPushCompanyId] = useState<string>('');
   const [form, setForm] = useState({
     version: '', agentType: 'msi', channel: 'stable',
     releaseNotes: '', downloadUrl: '', fileHashSha256: '',
@@ -42,8 +44,16 @@ export default function VersionsPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/rmm/agent-versions');
-      if (res.ok) setVersions(await res.json());
+      const [versRes, compRes] = await Promise.all([
+        fetch('/api/rmm/agent-versions'),
+        fetch('/api/companies?limit=500'),
+      ]);
+      if (versRes.ok) setVersions(await versRes.json());
+      if (compRes.ok) {
+        const d = await compRes.json();
+        const list = Array.isArray(d) ? d : d.companies || [];
+        setCompanies(list.filter((c: any) => c.rmmToken));
+      }
     } finally { setLoading(false); }
   }, []);
 
@@ -79,14 +89,18 @@ export default function VersionsPage() {
   };
 
   const handlePushUpdate = async () => {
-    if (!confirm('Enviar comando de atualização para TODAS as máquinas online agora?')) return;
+    const target = pushCompanyId
+      ? companies.find(c => c.id === pushCompanyId)?.name || 'empresa selecionada'
+      : 'TODAS as máquinas online';
+    if (!confirm(`Enviar comando de atualização para ${target}?`)) return;
     setPushing(true);
     setPushResult(null);
     try {
+      const body: any = pushCompanyId ? { companyId: pushCompanyId } : { allOnline: true };
       const res = await fetch('/api/rmm/agent/push-update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ allOnline: true }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (res.ok) {
@@ -121,7 +135,12 @@ export default function VersionsPage() {
           </h1>
           <p className="tm-text-secondary mt-1">Gerenciar versões, canais e distribuição de atualizações</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          <select value={pushCompanyId} onChange={e => setPushCompanyId(e.target.value)}
+            className="px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm min-w-[180px]">
+            <option value="">Todas as empresas</option>
+            {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
           <button onClick={handlePushUpdate} disabled={pushing}
             className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm flex items-center gap-2 disabled:opacity-50">
             {pushing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}

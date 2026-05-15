@@ -14,20 +14,23 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { machineIds, allOnline } = body;
+    const { machineIds, allOnline, companyId } = body;
 
-    if (!allOnline && (!Array.isArray(machineIds) || machineIds.length === 0)) {
-      return NextResponse.json({ error: 'machineIds[] ou allOnline=true obrigatório' }, { status: 400 });
+    if (!allOnline && !companyId && (!Array.isArray(machineIds) || machineIds.length === 0)) {
+      return NextResponse.json({ error: 'machineIds[], companyId ou allOnline=true obrigatório' }, { status: 400 });
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {};
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000);
 
-    if (allOnline) {
-      // Todas as máquinas online (checkin nos últimos 5 minutos)
-      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
-      where.lastCheckin = { gte: fiveMinAgo };
-      where.status = 'Ligado';
+    if (companyId) {
+      // Máquinas online da empresa específica
+      where.companyId = companyId;
+      where.lastCheckin = { gte: tenMinAgo };
+    } else if (allOnline) {
+      // Todas as máquinas online
+      where.lastCheckin = { gte: tenMinAgo };
     } else {
       where.id = { in: machineIds };
     }
@@ -41,22 +44,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Nenhuma máquina encontrada' }, { status: 404 });
     }
 
-    // Script PS1 para forçar update do agente
+    // Script PS1 para forcar update do agente (sem acentos para evitar encoding issues)
     const updateCommand = `
-# [WinnerRMM] Forçar atualização do agente
+# [WinnerRMM] Forcar atualizacao do agente
 try {
     $installDir = "C:\\ProgramData\\WinnerRMM"
     $modulesDir = "$installDir\\modules"
     
-    # Remover módulos em cache para forçar redownload
+    # Remover modulos em cache para forcar redownload
     if (Test-Path $modulesDir) {
         Get-ChildItem "$modulesDir\\*.psm1" | Remove-Item -Force -ErrorAction SilentlyContinue
     }
     
-    # Sinalizar para o agente fazer update na próxima iteração
+    # Sinalizar para o agente fazer update na proxima iteracao
     Set-Content -Path "$installDir\\force_update" -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Force
     
-    Write-Output "Update sinalizado com sucesso. Agente fará update na próxima iteração."
+    Write-Output "Update sinalizado com sucesso. Agente fara update na proxima iteracao."
 } catch {
     Write-Output "ERRO: $($_.Exception.Message)"
 }

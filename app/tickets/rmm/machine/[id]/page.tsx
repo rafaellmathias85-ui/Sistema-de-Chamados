@@ -364,13 +364,12 @@ export default function MachineDetailPage() {
       </div>
 
       {/* Resource Usage Bars */}
-      {(machine.cpuUsage !== null || machine.ramUsage !== null || machine.diskUsage !== null) && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {[
             { label: 'CPU', value: machine.cpuUsage, color: 'blue' },
             { label: 'RAM', value: machine.ramUsage, color: 'green' },
             { label: 'Disco', value: machine.diskUsage, color: 'yellow' },
-          ].filter(item => item.value !== null).map((item, i) => {
+          ].map((item, i) => {
             const pct = item.value || 0;
             const colorMap: Record<string, string> = { blue: 'bg-blue-500', green: 'bg-green-500', yellow: 'bg-yellow-500' };
             const textMap: Record<string, string> = { blue: 'text-blue-400', green: 'text-green-400', yellow: 'text-yellow-400' };
@@ -387,7 +386,6 @@ export default function MachineDetailPage() {
             );
           })}
         </div>
-      )}
 
       {/* Detail Tabs */}
       <div className="flex space-x-1 border-b tm-border overflow-x-auto">

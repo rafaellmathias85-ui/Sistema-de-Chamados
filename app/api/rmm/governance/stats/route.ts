@@ -12,24 +12,36 @@ export async function GET() {
       return NextResponse.json({ error: 'N\u00e3o autorizado' }, { status: 401 });
     }
 
-    const [activitySessions, usbEvents, webActivities, drivers, relayDiscovered, agentVersions, auditLogs] = await Promise.all([
+    const [
+      activitySessions,
+      usbEvents,
+      webMonitoredMachines,
+      drivers,
+      relayDiscovered,
+      agentVersions,
+      auditLogs,
+      totalMachines,
+    ] = await Promise.all([
       prisma.endpointActivitySession.count(),
       prisma.usbEvent.count(),
-      prisma.webActivity.count(),
+      // Contar máquinas distintas com webActivity (não URLs individuais)
+      prisma.webActivity.groupBy({ by: ['machineId'] }).then(g => g.length),
       prisma.driverInventory.count(),
       prisma.relayDiscoveredMachine.count(),
       prisma.agentVersion.count(),
       prisma.governanceAuditLog.count(),
+      prisma.rmmMachine.count(),
     ]);
 
     return NextResponse.json({
       activitySessions,
       usbEvents,
-      webActivities,
+      webActivities: webMonitoredMachines, // Máquinas com monitoramento web
       drivers,
       relayDiscovered,
       agentVersions,
       auditLogs,
+      totalMachines,
       usbBlocked: 0,
       webBlocked: 0,
     });
