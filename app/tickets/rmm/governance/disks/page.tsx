@@ -134,14 +134,11 @@ export default function DiskHealthPage() {
   const [filterMachine, setFilterMachine] = useState('');
 
   const loadData = useCallback(async () => {
+    if (!filterMachine) { setDisks([]); setAlerts([]); setLoading(false); return; }
     setLoading(true);
     try {
-      const diskParams = new URLSearchParams({ limit: '500' });
-      const alertParams = new URLSearchParams({ limit: '200' });
-      if (filterMachine) {
-        diskParams.set('machineId', filterMachine);
-        alertParams.set('machineId', filterMachine);
-      }
+      const diskParams = new URLSearchParams({ limit: '500', machineId: filterMachine });
+      const alertParams = new URLSearchParams({ limit: '200', machineId: filterMachine });
       const [diskRes, alertRes] = await Promise.all([
         fetch(`/api/rmm/governance/disk-health?${diskParams}`),
         fetch(`/api/rmm/governance/disk-health/alerts?${alertParams}`),

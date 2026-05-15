@@ -30,6 +30,8 @@ import {
   FileCode2,
   Ban,
   Power,
+  ArrowUpCircle,
+  Package,
 } from 'lucide-react';
 
 interface RmmTask {
@@ -72,6 +74,9 @@ interface MachineDetail {
   memorySlotsTotal: number | null;
   memorySlotsUsed: number | null;
   memoryModulesJson: string | null;
+  agentVersion: string | null;
+  agentType: string | null;
+  updateChannel: string | null;
   company: { id: string; name: string };
   tasks: RmmTask[];
 }
@@ -144,7 +149,7 @@ export default function MachineDetailPage() {
     fetchMachine();
     fetchSnapshot();
     fetchScripts();
-    const interval = setInterval(() => { fetchMachine(); fetchSnapshot(); }, 10000);
+    const interval = setInterval(() => { fetchMachine(); fetchSnapshot(); }, 30000);
     return () => clearInterval(interval);
   }, [params.id]);
 
@@ -174,6 +179,30 @@ export default function MachineDetailPage() {
 
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [reactivating, setReactivating] = useState(false);
+  const [updatingAgent, setUpdatingAgent] = useState(false);
+
+  const handleForceUpdate = async () => {
+    if (updatingAgent) return;
+    setUpdatingAgent(true);
+    try {
+      const res = await fetch('/api/rmm/agent/push-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machineIds: [params.id] }),
+      });
+      if (res.ok) {
+        alert('✅ Atualização enviada! O agente será atualizado no próximo check-in.');
+        fetchMachine();
+      } else {
+        alert('Erro ao enviar atualização.');
+      }
+    } catch (e) {
+      console.error('Erro:', e);
+      alert('Erro ao enviar atualização.');
+    } finally {
+      setUpdatingAgent(false);
+    }
+  };
 
   const handleCancelTask = async (taskId: string) => {
     if (cancelling) return;
@@ -302,6 +331,17 @@ export default function MachineDetailPage() {
                 TeamViewer
               </a>
             )}
+            {isOnline && (
+              <button
+                onClick={handleForceUpdate}
+                disabled={updatingAgent}
+                className="px-3 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition flex items-center gap-2 text-sm font-medium disabled:opacity-50"
+                title="Forçar atualização do agente"
+              >
+                {updatingAgent ? <Loader2 size={16} className="animate-spin" /> : <ArrowUpCircle size={16} />}
+                Atualizar Agente
+              </button>
+            )}
             {!isOnline && (
               <button
                 onClick={handleReactivateAgent}
@@ -382,6 +422,7 @@ export default function MachineDetailPage() {
             { label: 'Usuário', value: machine.username || '—', icon: User },
             { label: 'Empresa', value: machine.company.name, icon: Building2 },
             { label: 'Antivírus', value: machine.antivirusStatus || '—', icon: Monitor },
+            { label: 'Versão do Agente', value: machine.agentVersion || 'Não informada', icon: Package },
             { label: 'TeamViewer ID', value: machine.teamviewerId || 'Não instalado', icon: Globe },
             { label: 'Último Boot', value: formatDate(machine.lastBootTime), icon: Clock },
             { label: 'Último Check-in', value: formatDate(machine.lastCheckin), icon: Clock },

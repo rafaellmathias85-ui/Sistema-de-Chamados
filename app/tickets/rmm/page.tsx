@@ -30,6 +30,7 @@ import {
   Bot,
   Power,
   Loader2,
+  ArrowUpCircle,
 } from 'lucide-react';
 
 interface RmmMachine {
@@ -69,6 +70,7 @@ export default function RmmDashboardPage() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline'>('all');
   const [deleting, setDeleting] = useState<string | null>(null);
   const [reactivating, setReactivating] = useState<string | null>(null);
+  const [updatingAgent, setUpdatingAgent] = useState<string | null>(null);
 
   const isAdmin = ['ADMIN','SUPPORT'].includes(session?.user?.role || '');
 
@@ -95,7 +97,7 @@ export default function RmmDashboardPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000); // Auto-refresh 30s
+    const interval = setInterval(fetchData, 60000); // Auto-refresh 60s
     return () => clearInterval(interval);
   }, [filterCompany]);
 
@@ -144,6 +146,29 @@ export default function RmmDashboardPage() {
       alert('Erro ao tentar reativar o agente.');
     } finally {
       setReactivating(null);
+    }
+  };
+
+  const handleForceUpdate = async (machineId: string) => {
+    if (updatingAgent) return;
+    setUpdatingAgent(machineId);
+    try {
+      const res = await fetch('/api/rmm/agent/push-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machineIds: [machineId] }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`✅ Atualização enviada para ${data.machines?.[0] || 'a máquina'}.\nO agente será atualizado no próximo check-in.`);
+      } else {
+        alert('Erro ao enviar atualização.');
+      }
+    } catch (e) {
+      console.error('Erro:', e);
+      alert('Erro ao enviar atualização.');
+    } finally {
+      setUpdatingAgent(null);
     }
   };
 
@@ -227,7 +252,6 @@ export default function RmmDashboardPage() {
         {[
           { href: '/tickets/rmm/governance', icon: Shield, label: 'Governance', color: 'text-emerald-400' },
           { href: '/tickets/rmm/security', icon: ShieldAlert, label: 'Segurança (SIEM)', color: 'text-red-400' },
-          { href: '/tickets/rmm/network', icon: Network, label: 'Rede (SNMP)', color: 'text-cyan-400' },
           { href: '/tickets/rmm/playbooks', icon: Zap, label: 'Playbooks', color: 'text-yellow-400' },
           { href: '/tickets/rmm/ai-chat', icon: Bot, label: 'Assistente IA', color: 'text-purple-400' },
           { href: '/tickets/rmm/scripts', icon: FileCode2, label: 'Scripts Remotos', color: 'text-cyan-400' },
@@ -395,6 +419,16 @@ export default function RmmDashboardPage() {
                         >
                           <Terminal size={16} />
                         </Link>
+                        {m.status === 'Ligado' && isAdmin && (
+                          <button
+                            onClick={() => handleForceUpdate(m.id)}
+                            disabled={updatingAgent === m.id}
+                            className="p-1.5 tm-text-secondary hover:text-cyan-400 hover:tm-bg-card rounded-lg transition disabled:opacity-50"
+                            title="Forçar atualização do agente"
+                          >
+                            {updatingAgent === m.id ? <Loader2 size={16} className="animate-spin" /> : <ArrowUpCircle size={16} />}
+                          </button>
+                        )}
                         {m.status !== 'Ligado' && (
                           <button
                             onClick={() => handleReactivateAgent(m.id)}

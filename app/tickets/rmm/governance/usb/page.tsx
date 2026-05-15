@@ -48,8 +48,8 @@ export default function UsbPage() {
   const [filterMachine, setFilterMachine] = useState('');
 
   const loadEvents = useCallback(async () => {
-    const params = new URLSearchParams({ limit: '200' });
-    if (filterMachine) params.set('machineId', filterMachine);
+    if (!filterMachine) { setEvents([]); return; }
+    const params = new URLSearchParams({ limit: '200', machineId: filterMachine });
     const res = await fetch(`/api/rmm/governance/usb-events?${params}`);
     if (res.ok) setEvents(await res.json());
   }, [filterMachine]);

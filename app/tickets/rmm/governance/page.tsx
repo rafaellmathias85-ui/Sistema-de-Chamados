@@ -34,26 +34,10 @@ export default function GovernanceDashboard() {
 
   const loadStats = async () => {
     try {
-      const [actRes, usbRes, webRes, drvRes, relayRes, verRes, auditRes] = await Promise.all([
-        fetch('/api/rmm/governance/activity?limit=1').then(r => r.json()).catch(() => []),
-        fetch('/api/rmm/governance/usb-events?limit=1').then(r => r.json()).catch(() => []),
-        fetch('/api/rmm/governance/web-activity?limit=1').then(r => r.json()).catch(() => []),
-        fetch('/api/rmm/governance/drivers?limit=1').then(r => r.json()).catch(() => []),
-        fetch('/api/rmm/relay/discovered').then(r => r.json()).catch(() => []),
-        fetch('/api/rmm/agent-versions').then(r => r.json()).catch(() => []),
-        fetch('/api/rmm/governance/audit-log?limit=1').then(r => r.json()).catch(() => []),
-      ]);
-      setStats({
-        activitySessions: Array.isArray(actRes) ? actRes.length : 0,
-        usbEvents: Array.isArray(usbRes) ? usbRes.length : 0,
-        webActivities: Array.isArray(webRes) ? webRes.length : 0,
-        drivers: Array.isArray(drvRes) ? drvRes.length : 0,
-        relayDiscovered: Array.isArray(relayRes) ? relayRes.length : 0,
-        agentVersions: Array.isArray(verRes) ? verRes.length : 0,
-        auditLogs: Array.isArray(auditRes) ? auditRes.length : 0,
-        usbBlocked: 0,
-        webBlocked: 0,
-      });
+      const res = await fetch('/api/rmm/governance/stats');
+      if (res.ok) {
+        setStats(await res.json());
+      }
     } catch (e) {
       console.error('Error loading governance stats:', e);
     } finally {

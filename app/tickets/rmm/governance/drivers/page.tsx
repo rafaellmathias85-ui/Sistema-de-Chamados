@@ -31,10 +31,10 @@ export default function DriversPage() {
   const [filterMachine, setFilterMachine] = useState('');
 
   const loadData = useCallback(async () => {
+    if (!filterMachine) { setDrivers([]); setLoading(false); return; }
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: '500' });
-      if (filterMachine) params.set('machineId', filterMachine);
+      const params = new URLSearchParams({ limit: '500', machineId: filterMachine });
       const res = await fetch(`/api/rmm/governance/drivers?${params}`);
       if (res.ok) setDrivers(await res.json());
     } catch (e) {

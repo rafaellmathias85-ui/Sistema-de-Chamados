@@ -58,8 +58,8 @@ export default function WebPage() {
   const [filterMachine, setFilterMachine] = useState('');
 
   const loadLogs = useCallback(async () => {
-    const params = new URLSearchParams({ limit: '200' });
-    if (filterMachine) params.set('machineId', filterMachine);
+    if (!filterMachine) { setLogs([]); return; }
+    const params = new URLSearchParams({ limit: '200', machineId: filterMachine });
     const res = await fetch(`/api/rmm/webfilter/logs?${params}`);
     if (res.ok) setLogs(await res.json());
   }, [filterMachine]);

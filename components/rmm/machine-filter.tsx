@@ -36,7 +36,7 @@ export default function MachineFilter({ value, onChange, className }: MachineFil
         onChange={e => onChange(e.target.value)}
         className="px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm min-w-[200px]"
       >
-        <option value="">Todas as máquinas</option>
+        <option value="">⬅ Selecione uma máquina</option>
         {machines.map(m => (
           <option key={m.id} value={m.id}>
             {m.hostname} ({m.company?.name || '—'})

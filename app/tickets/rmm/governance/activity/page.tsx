@@ -33,10 +33,10 @@ export default function ActivityPage() {
   const [filterMachine, setFilterMachine] = useState('');
 
   const loadData = useCallback(async () => {
+    if (!filterMachine) { setSessions([]); setLoading(false); return; }
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: '200' });
-      if (filterMachine) params.set('machineId', filterMachine);
+      const params = new URLSearchParams({ limit: '200', machineId: filterMachine });
       const res = await fetch(`/api/rmm/governance/activity?${params}`);
       if (res.ok) setSessions(await res.json());
     } catch (e) {
