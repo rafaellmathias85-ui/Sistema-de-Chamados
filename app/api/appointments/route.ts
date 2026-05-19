@@ -5,6 +5,17 @@ import { getSession } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Formata data "YYYY-MM-DD" para "DD/MM/YYYY" sem usar new Date()
+ * Evita bug de timezone onde meia-noite UTC vira dia anterior em UTC-3.
+ */
+function formatDateBR(dateStr: string | Date): string {
+  const str = typeof dateStr === 'string' ? dateStr : dateStr.toISOString();
+  const parts = str.slice(0, 10).split('-');
+  if (parts.length !== 3) return str;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
 // GET - List appointments (filtered by date range, technicianId)
 export async function GET(request: NextRequest) {
   try {
@@ -110,7 +121,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Empresa não encontrada' }, { status: 404 });
       }
 
-      const dateStr = new Date(date).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      const dateStr = formatDateBR(date);
 
       // Resolve creator (solicitante): try to find a User in the company by email,
       // fallback to logged-in user if not found. This ensures "Solicitante" shows the
@@ -221,7 +232,7 @@ export async function POST(request: NextRequest) {
         ticketId,
         action: 'appointment_created',
         toValue: `${startTime}-${endTime} com ${tech.name}`,
-        note: `Visita técnica agendada para ${new Date(date).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`,
+        note: `Visita técnica agendada para ${formatDateBR(date)}`,
         userId: session.user.id,
         userName: session.user.name || 'Usuário',
         userRole: session.user.role as Role,
@@ -229,7 +240,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Send confirmation emails
-    const dateStr = new Date(date).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const dateStr = formatDateBR(date);
     const templateData = {
       ticketNumber: ticket.number,
       requesterName: requesterName || '',
@@ -685,7 +696,7 @@ export async function PATCH(request: NextRequest) {
 
     // Update ticket description if date changed
     if (date || startTime || endTime) {
-      const dateStr = new Date(updated.date).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      const dateStr = formatDateBR(updated.date);
       await prisma.ticket.update({
         where: { id: existing.ticketId },
         data: {
@@ -697,7 +708,7 @@ export async function PATCH(request: NextRequest) {
     // Log in ticket history
     const changes: string[] = [];
     if (date && new Date(date).toISOString().slice(0, 10) !== new Date(existing.date).toISOString().slice(0, 10))
-      changes.push(`Data: ${new Date(existing.date).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} → ${new Date(date).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`);
+      changes.push(`Data: ${formatDateBR(existing.date)} → ${formatDateBR(date)}`);
     if (startTime && startTime !== existing.startTime) changes.push(`Início: ${existing.startTime} → ${startTime}`);
     if (endTime && endTime !== existing.endTime) changes.push(`Fim: ${existing.endTime} → ${endTime}`);
     if (technicianId && technicianId !== existing.technicianId) changes.push(`Técnico alterado`);
@@ -720,7 +731,7 @@ export async function PATCH(request: NextRequest) {
     // Send reschedule email to client if notifyClient
     if (notifyClient && existing.requesterEmail) {
       try {
-        const dateStr = new Date(updated.date).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+        const dateStr = formatDateBR(updated.date);
         const { sendNotificationEmail } = await import('@/lib/notifications');
         await sendNotificationEmail({
           notificationId: process.env.NOTIF_ID_CONFIRMAO_VISITA_TCNICA || '',
