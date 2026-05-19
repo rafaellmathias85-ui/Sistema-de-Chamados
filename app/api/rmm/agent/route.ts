@@ -8,10 +8,31 @@ import fs from 'fs';
 import path from 'path';
 
 // ============================================================
-// Carrega o Agente V2 do disco e substitui placeholders
-// O template fica em public/rmm/WinnerRMM-AgentV2.ps1
-// Isso permite atualizar o agente sem rebuild da aplicacao
+// Carrega o Agente V3 do disco e substitui placeholders
+// O template fica em public/rmm/WinnerRMM-AgentV3.ps1
+// Melhorias: NSSM service, dual-server fallback, Write-Log global,
+// DACL anti-tamper, agentVersion, self-update, security events fix
 // ============================================================
+function loadAgentV3(apiUrl: string, companyToken: string, fallbackApiUrl: string = ''): string {
+  const templatePath = path.join(process.cwd(), 'public', 'rmm', 'WinnerRMM-AgentV3.ps1');
+  const template = fs.readFileSync(templatePath, 'utf-8');
+  return template
+    .replace(/\{\{API_URL\}\}/g, apiUrl)
+    .replace(/\{\{COMPANY_TOKEN\}\}/g, companyToken)
+    .replace(/\{\{FALLBACK_API_URL\}\}/g, fallbackApiUrl);
+}
+
+// Carrega o Watchdog V3 do disco e substitui placeholders
+function loadWatchdogV3(apiUrl: string, companyToken: string, fallbackApiUrl: string = ''): string {
+  const templatePath = path.join(process.cwd(), 'public', 'rmm', 'WinnerRMM-Watchdog.ps1');
+  const template = fs.readFileSync(templatePath, 'utf-8');
+  return template
+    .replace(/\{\{API_URL\}\}/g, apiUrl)
+    .replace(/\{\{COMPANY_TOKEN\}\}/g, companyToken)
+    .replace(/\{\{FALLBACK_API_URL\}\}/g, fallbackApiUrl);
+}
+
+// Retrocompatibilidade: carrega V2 se necessário
 function loadAgentV2(apiUrl: string, companyToken: string): string {
   const templatePath = path.join(process.cwd(), 'public', 'rmm', 'WinnerRMM-AgentV2.ps1');
   const template = fs.readFileSync(templatePath, 'utf-8');
@@ -21,34 +42,49 @@ function loadAgentV2(apiUrl: string, companyToken: string): string {
 }
 
 // ============================================================
-// Instalador Completo PowerShell (autossuficiente)
-// Embute o agente + registra como Tarefa Agendada do Windows
+// Instalador Completo V3 PowerShell (autossuficiente)
+// Instala agente como Windows Service via NSSM + watchdog como Scheduled Task
+// Melhorias: SCM recovery (A), Execution Policy bypass (B), DACL (F), ps2exe (H)
 // ============================================================
 function generateFullInstaller(apiUrl: string, companyToken: string, companyName: string): string {
-  const agentContent = loadAgentV2(apiUrl, companyToken);
+  // Computar fallback URL
+  const fallbackApiUrl = apiUrl.includes('wticorp.com.br')
+    ? 'https://winner-tecnologia-si-aq2c13.abacusai.app/api/rmm'
+    : apiUrl.includes('abacusai.app')
+      ? 'https://www.wticorp.com.br/api/rmm'
+      : '';
+
+  const agentContent = loadAgentV3(apiUrl, companyToken, fallbackApiUrl);
+  const watchdogContent = loadWatchdogV3(apiUrl, companyToken, fallbackApiUrl);
 
   // ATENCAO: o agente e embutido como here-string PowerShell @' ... '@ (literal, sem expansao
-  // de variaveis). NAO usar Base64+FromBase64String pois EDR/AV (Bitdefender, Defender ATP,
-  // SentinelOne, CrowdStrike) detectam esse padrao como assinatura de loader malicioso.
-  // O delimitador @'...'@ preserva o conteudo do agente exatamente como string literal.
-  // Caso o agente contenha a sequencia '@ no inicio de linha, ela e escapada para ` @.
+  // de variaveis). NAO usar Base64+FromBase64String pois EDR/AV detectam esse padrao.
   const escapedAgent = agentContent.replace(/^'@/gm, '`@');
+  const escapedWatchdog = watchdogContent.replace(/^'@/gm, '`@');
 
   return `# ============================================================
-# Instalador RMM - Winner Tecnologia
+# Instalador RMM V3 - Winner Tecnologia
 # Empresa: ${companyName}
+# Arquitetura: Windows Service (NSSM) + Watchdog (Scheduled Task)
 # Execute como Administrador (Botao direito > Executar como Admin)
 # ============================================================
 
 $ErrorActionPreference = "Stop"
 $InstallDir = "C:\\ProgramData\\WinnerRMM"
-$TaskName = "WinnerRMMAgent"
+$StagingDir = "$InstallDir\\staging"
+$ModulesDir = "$InstallDir\\modules"
 $AgentFile = "$InstallDir\\agente_rmm.ps1"
+$WatchdogFile = "$InstallDir\\watchdog.ps1"
+$NssmExe = "$InstallDir\\nssm.exe"
+$ServiceName = "WinnerRMMService"
+$WatchdogTaskName = "WinnerRMMWatchdog"
+$NssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Winner Tecnologia - Instalador RMM" -ForegroundColor Cyan
+Write-Host "  Winner Tecnologia - Instalador RMM V3" -ForegroundColor Cyan
 Write-Host "  Empresa: ${companyName}" -ForegroundColor Yellow
+Write-Host "  Modo: Windows Service + Watchdog" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -61,98 +97,120 @@ if (-not $isAdmin) {
     exit 1
 }
 
-Write-Host "[1/4] Criando diretorio de instalacao..." -ForegroundColor Cyan
-if (!(Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+# Melhoria B: Garantir Execution Policy
+Write-Host "[1/7] Configurando Execution Policy..." -ForegroundColor Cyan
+try { Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope LocalMachine -Force -ErrorAction SilentlyContinue } catch {}
+try { Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force } catch {}
+
+Write-Host "[2/7] Criando diretorios de instalacao..." -ForegroundColor Cyan
+foreach ($dir in @($InstallDir, $StagingDir, $ModulesDir)) {
+    if (!(Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
 }
 
-Write-Host "[2/4] Gravando agente RMM..." -ForegroundColor Cyan
-# Conteudo do agente embutido como here-string literal (sem ofuscacao Base64).
-# Isso evita falsos positivos de antivirus / EDR que tratam padroes
-# 'Base64 -> FromBase64String -> Invoke' como loader malicioso (heuristica AMSI).
+# Limpar instalacao anterior (Scheduled Tasks do V2)
+Write-Host "       Removendo instalacao V2 anterior (se existir)..." -ForegroundColor DarkGray
+$oldTasks = @("WinnerRMMAgent", "WinnerRMMWatchdog")
+foreach ($t in $oldTasks) {
+    $existing = Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
+    if ($existing) {
+        Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "       Tarefa V2 '$t' removida" -ForegroundColor DarkGray
+    }
+}
+# Parar service V3 anterior se existir
+$existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existingSvc) {
+    Write-Host "       Parando service anterior..." -ForegroundColor DarkGray
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    if (Test-Path $NssmExe) {
+        & $NssmExe remove $ServiceName confirm 2>&1 | Out-Null
+        Start-Sleep -Seconds 2
+    }
+}
+
+Write-Host "[3/7] Gravando agente RMM V3..." -ForegroundColor Cyan
 $agentContent = @'
 ${escapedAgent}
 '@
 Set-Content -LiteralPath $AgentFile -Value $agentContent -Encoding UTF8 -Force
 
-Write-Host "[3/4] Registrando tarefa agendada do Windows..." -ForegroundColor Cyan
-
-# Remove tarefa anterior se existir
-$existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($existingTask) {
-    Write-Host "       Removendo instalacao anterior..." -ForegroundColor Yellow
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Start-Sleep -Seconds 2
-}
-
-# Criar tarefa agendada com privilegios SYSTEM
-# Triggers: At Startup + A cada 5 minutos para garantir que o agente esteja rodando
-$triggerStartup = New-ScheduledTaskTrigger -AtStartup
-# IMPORTANTE: NAO usar [TimeSpan]::MaxValue aqui pois gera XML invalido (P99999999DT23H59M59S) no Task Scheduler.
-# Usamos 825 dias que eh o maximo seguro aceito pelo XML xs:duration do Task Scheduler.
-$triggerPeriodic = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) \`
-    -RepetitionInterval (New-TimeSpan -Minutes 5) \`
-    -RepetitionDuration (New-TimeSpan -Days 825)
-
-$action = New-ScheduledTaskAction -Execute "powershell.exe" \`
-    -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File \`"$AgentFile\`""
-
-$settings = New-ScheduledTaskSettingsSet \`
-    -Hidden \`
-    -AllowStartIfOnBatteries \`
-    -DontStopIfGoingOnBatteries \`
-    -StartWhenAvailable \`
-    -RestartCount 5 \`
-    -RestartInterval (New-TimeSpan -Minutes 1) \`
-    -MultipleInstances IgnoreNew \`
-    -ExecutionTimeLimit ([TimeSpan]::Zero)
-
-$principal = New-ScheduledTaskPrincipal \`
-    -UserId "SYSTEM" \`
-    -RunLevel Highest \`
-    -LogonType ServiceAccount
-
-Register-ScheduledTask \`
-    -TaskName $TaskName \`
-    -Action $action \`
-    -Trigger @($triggerStartup, $triggerPeriodic) \`
-    -Settings $settings \`
-    -Principal $principal \`
-    -Description "Agente de monitoramento remoto - Winner Tecnologia" \`
-    -Force | Out-Null
-
-# Watchdog: tarefa separada que verifica a cada 10 min se o agente esta rodando,
-# caso nao esteja, reinicia-o automaticamente.
-$watchdogScript = @'
-$TaskName = "WinnerRMMAgent"
-$AgentFile = "C:\ProgramData\WinnerRMM\agente_rmm.ps1"
-$LogFile = "C:\ProgramData\WinnerRMM\watchdog.log"
-$ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-try {
-    $proc = Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*$AgentFile*" }
-    if (-not $proc) {
-        Add-Content -Path $LogFile -Value "[$ts] Agente nao esta rodando. Reiniciando..." -ErrorAction SilentlyContinue
-        Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    } else {
-        Add-Content -Path $LogFile -Value "[$ts] Agente OK (PID $($proc.ProcessId))" -ErrorAction SilentlyContinue
-    }
-} catch {
-    Add-Content -Path $LogFile -Value "[$ts] Watchdog erro: $($_.Exception.Message)" -ErrorAction SilentlyContinue
-}
+Write-Host "[4/7] Gravando watchdog..." -ForegroundColor Cyan
+$watchdogContent = @'
+${escapedWatchdog}
 '@
-$watchdogFile = "$InstallDir\watchdog.ps1"
-Set-Content -Path $watchdogFile -Value $watchdogScript -Encoding UTF8 -Force
+Set-Content -LiteralPath $WatchdogFile -Value $watchdogContent -Encoding UTF8 -Force
 
-$watchdogTaskName = "WinnerRMMWatchdog"
-$existingWatchdog = Get-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue
-if ($existingWatchdog) {
-    Unregister-ScheduledTask -TaskName $watchdogTaskName -Confirm:$false -ErrorAction SilentlyContinue
+Write-Host "[5/7] Baixando e instalando NSSM (Service Manager)..." -ForegroundColor Cyan
+if (!(Test-Path $NssmExe)) {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $zipPath = "$InstallDir\\nssm.zip"
+        Invoke-WebRequest -Uri $NssmUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+        $extractDir = "$InstallDir\\nssm_extract"
+        Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+        $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Where-Object {
+            $_.DirectoryName -match "win64"
+        } | Select-Object -First 1
+        if (-not $found) {
+            $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Select-Object -First 1
+        }
+        if ($found) {
+            Copy-Item -Path $found.FullName -Destination $NssmExe -Force
+            Write-Host "       NSSM instalado com sucesso" -ForegroundColor Green
+        } else {
+            throw "NSSM.exe nao encontrado no ZIP"
+        }
+        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "       [AVISO] Erro ao baixar NSSM: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "       Tentando fallback com sc.exe..." -ForegroundColor Yellow
+    }
+}
+
+Write-Host "[6/7] Registrando Windows Service..." -ForegroundColor Cyan
+if (Test-Path $NssmExe) {
+    # Instalar via NSSM (preferido)
+    & $NssmExe install $ServiceName "powershell.exe" "-ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" 2>&1 | Out-Null
+    & $NssmExe set $ServiceName DisplayName "Winner RMM Agent" 2>&1 | Out-Null
+    & $NssmExe set $ServiceName Description "Agente de monitoramento remoto - Winner Tecnologia" 2>&1 | Out-Null
+    & $NssmExe set $ServiceName Start SERVICE_AUTO_START 2>&1 | Out-Null
+    & $NssmExe set $ServiceName ObjectName LocalSystem 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppStdout "$InstallDir\\service_stdout.log" 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppStderr "$InstallDir\\service_stderr.log" 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppRotateFiles 1 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppRotateBytes 5242880 2>&1 | Out-Null
+    Write-Host "       Service registrado via NSSM" -ForegroundColor Green
+} else {
+    # Fallback: registrar via sc.exe + wrapper script
+    Write-Host "       Usando sc.exe como fallback..." -ForegroundColor Yellow
+    $wrapperFile = "$InstallDir\\service_wrapper.bat"
+    Set-Content -Path $wrapperFile -Value "@echo off\`r\`npowershell.exe -ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" -Encoding ASCII
+    & sc.exe create $ServiceName binPath= "cmd.exe /c \`"$wrapperFile\`"" start= auto DisplayName= "Winner RMM Agent" 2>&1 | Out-Null
+    & sc.exe description $ServiceName "Agente de monitoramento remoto - Winner Tecnologia" 2>&1 | Out-Null
+}
+
+# Melhoria A: Configurar SCM failure recovery (restart automatico)
+# 1a falha: restart apos 10s | 2a: 30s | 3a: 60s | Reset counter apos 24h
+& sc.exe failure $ServiceName reset= 86400 actions= restart/10000/restart/30000/restart/60000 2>&1 | Out-Null
+Write-Host "       SCM failure recovery configurado (10s/30s/60s)" -ForegroundColor Green
+
+# Iniciar o service
+& sc.exe start $ServiceName 2>&1 | Out-Null
+Start-Sleep -Seconds 3
+
+# Registrar watchdog como Scheduled Task (redundancia)
+Write-Host "[7/7] Registrando watchdog (Scheduled Task)..." -ForegroundColor Cyan
+$existingWD = Get-ScheduledTask -TaskName $WatchdogTaskName -ErrorAction SilentlyContinue
+if ($existingWD) {
+    Unregister-ScheduledTask -TaskName $WatchdogTaskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 $wdAction = New-ScheduledTaskAction -Execute "powershell.exe" \`
-    -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File \`"$watchdogFile\`""
-$wdTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) \`
-    -RepetitionInterval (New-TimeSpan -Minutes 10) \`
+    -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File \`"$WatchdogFile\`""
+$wdTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5) \`
+    -RepetitionInterval (New-TimeSpan -Minutes 15) \`
     -RepetitionDuration (New-TimeSpan -Days 825)
 $wdSettings = New-ScheduledTaskSettingsSet \`
     -Hidden \`
@@ -160,27 +218,48 @@ $wdSettings = New-ScheduledTaskSettingsSet \`
     -DontStopIfGoingOnBatteries \`
     -StartWhenAvailable \`
     -MultipleInstances IgnoreNew
+$wdPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest -LogonType ServiceAccount
 Register-ScheduledTask \`
-    -TaskName $watchdogTaskName \`
+    -TaskName $WatchdogTaskName \`
     -Action $wdAction \`
     -Trigger $wdTrigger \`
     -Settings $wdSettings \`
-    -Principal $principal \`
-    -Description "Watchdog do agente RMM - Winner Tecnologia" \`
+    -Principal $wdPrincipal \`
+    -Description "Watchdog do agente RMM V3 - Winner Tecnologia" \`
     -Force | Out-Null
+Start-ScheduledTask -TaskName $WatchdogTaskName -ErrorAction SilentlyContinue
 
-Write-Host "[4/4] Iniciando agente e watchdog..." -ForegroundColor Cyan
-Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-Start-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue
+# Melhoria F: Aplicar DACL anti-tamper no diretorio
+Write-Host "       Aplicando protecao anti-tamper (DACL)..." -ForegroundColor DarkGray
+try {
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $ruleSystem = New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\\SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+    $acl.AddAccessRule($ruleSystem)
+    $ruleAdmins = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\\Administrators", "ReadAndExecute", "ContainerInherit,ObjectInherit", "None", "Allow")
+    $acl.AddAccessRule($ruleAdmins)
+    Set-Acl -Path $InstallDir -AclObject $acl -ErrorAction SilentlyContinue
+} catch {}
+
+# Verificar status final
+$svcCheck = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+$svcStatus = if ($svcCheck -and $svcCheck.Status -eq 'Running') { "RODANDO" } else { "VERIFICAR" }
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "  Instalacao concluida com sucesso!" -ForegroundColor Green
+Write-Host "  Instalacao V3 concluida!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Diretorio: $InstallDir" -ForegroundColor Gray
-Write-Host "Tarefa: $TaskName" -ForegroundColor Gray
-Write-Host "Log: $InstallDir\\rmm_agent.log" -ForegroundColor Gray
+Write-Host "  Service: $ServiceName ($svcStatus)" -ForegroundColor $(if ($svcStatus -eq "RODANDO") { "Green" } else { "Yellow" })
+Write-Host "  Watchdog: $WatchdogTaskName (a cada 15 min)" -ForegroundColor Gray
+Write-Host "  Diretorio: $InstallDir" -ForegroundColor Gray
+Write-Host "  Log: $InstallDir\\rmm_agent.log" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  Protecoes ativas:" -ForegroundColor Cyan
+Write-Host "    - Windows Service com auto-restart pelo SCM" -ForegroundColor Gray
+Write-Host "    - Watchdog independente recria service se deletado" -ForegroundColor Gray
+Write-Host "    - DACL anti-tamper no diretorio" -ForegroundColor Gray
+Write-Host "    - Dual-server fallback" -ForegroundColor Gray
 Write-Host ""
 
 # Para deploy silencioso via GPO/Intune, remova a linha abaixo:
@@ -188,17 +267,22 @@ Read-Host "Pressione Enter para fechar"
 `;
 }
 
-// Script de desinstalação
+// Script de desinstalação V3 (remove service + task + arquivos)
 function generateUninstaller(): string {
   return `# ============================================================
-# Desinstalador RMM - Winner Tecnologia
+# Desinstalador RMM V3 - Winner Tecnologia
+# Remove: Windows Service + Scheduled Tasks + NSSM + arquivos
 # Execute como Administrador
 # ============================================================
 
 $ErrorActionPreference = "SilentlyContinue"
 $InstallDir = "C:\\ProgramData\\WinnerRMM"
-$TaskName = "WinnerRMMAgent"
+$NssmExe = "$InstallDir\\nssm.exe"
+$ServiceName = "WinnerRMMService"
 $WatchdogTaskName = "WinnerRMMWatchdog"
+# Compat V2
+$OldTaskName = "WinnerRMMAgent"
+$OldWatchdogTaskName = "WinnerRMMWatchdog"
 
 Write-Host ""
 Write-Host "Winner Tecnologia - Desinstalador RMM" -ForegroundColor Yellow
@@ -211,17 +295,57 @@ if (-not $isAdmin) {
     exit 1
 }
 
-Write-Host "Parando tarefas agendadas..." -ForegroundColor Cyan
-Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-Stop-ScheduledTask -TaskName $WatchdogTaskName -ErrorAction SilentlyContinue
-Unregister-ScheduledTask -TaskName $WatchdogTaskName -Confirm:$false -ErrorAction SilentlyContinue
+# 1. Parar e remover Windows Service (V3)
+Write-Host "[1/4] Removendo Windows Service..." -ForegroundColor Cyan
+$svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($svc) {
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    if (Test-Path $NssmExe) {
+        & $NssmExe remove $ServiceName confirm 2>&1 | Out-Null
+    } else {
+        & sc.exe delete $ServiceName 2>&1 | Out-Null
+    }
+    Write-Host "       Service removido" -ForegroundColor Green
+} else {
+    Write-Host "       Service nao encontrado (OK)" -ForegroundColor DarkGray
+}
 
-Write-Host "Removendo arquivos..." -ForegroundColor Cyan
+# 2. Remover Scheduled Tasks (V2 + V3 watchdog)
+Write-Host "[2/4] Removendo Scheduled Tasks..." -ForegroundColor Cyan
+$tasks = @($WatchdogTaskName, $OldTaskName, $OldWatchdogTaskName)
+foreach ($t in $tasks) {
+    $existing = Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
+    if ($existing) {
+        Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "       Task '$t' removida" -ForegroundColor Green
+    }
+}
+
+# 3. Matar processos remanescentes
+Write-Host "[3/4] Finalizando processos..." -ForegroundColor Cyan
+Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
+    $_.CommandLine -like "*WinnerRMM*" -or $_.CommandLine -like "*agente_rmm*"
+} | ForEach-Object { $_.Terminate() } 2>&1 | Out-Null
+
+# 4. Restaurar DACL e remover arquivos
+Write-Host "[4/4] Removendo arquivos..." -ForegroundColor Cyan
+try {
+    # Restaurar permissoes para poder deletar
+    $acl = Get-Acl $InstallDir -ErrorAction SilentlyContinue
+    if ($acl) {
+        $acl.SetAccessRuleProtection($false, $true)
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\\Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+        $acl.AddAccessRule($rule)
+        Set-Acl -Path $InstallDir -AclObject $acl -ErrorAction SilentlyContinue
+    }
+} catch {}
 Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host ""
-Write-Host "Desinstalacao concluida!" -ForegroundColor Green
+Write-Host "Desinstalacao completa!" -ForegroundColor Green
+Write-Host "Todos os componentes foram removidos." -ForegroundColor Gray
 Read-Host "Pressione Enter para fechar"
 `;
 }
@@ -587,11 +711,97 @@ export async function POST(request: NextRequest) {
     }
 
     if (format === 'agent_ps1') {
-      const content = loadAgentV2(apiUrl, company.rmmToken!);
+      const fallbackApiUrl = apiUrl.includes('wticorp.com.br')
+        ? 'https://winner-tecnologia-si-aq2c13.abacusai.app/api/rmm'
+        : apiUrl.includes('abacusai.app') ? 'https://www.wticorp.com.br/api/rmm' : '';
+      const content = loadAgentV3(apiUrl, company.rmmToken!, fallbackApiUrl);
       return new NextResponse(content, {
         headers: {
           'Content-Type': 'text/plain; charset=utf-8',
-          'Content-Disposition': `attachment; filename="agente_rmm_${safeName}.ps1"`,
+          'Content-Disposition': `attachment; filename="agente_rmm_v3_${safeName}.ps1"`,
+        },
+      });
+    }
+
+    // Melhoria H: Script para compilar agente como EXE (ps2exe)
+    if (format === 'ps2exe') {
+      const fallbackApiUrl = apiUrl.includes('wticorp.com.br')
+        ? 'https://winner-tecnologia-si-aq2c13.abacusai.app/api/rmm'
+        : apiUrl.includes('abacusai.app') ? 'https://www.wticorp.com.br/api/rmm' : '';
+      const agentContent = loadAgentV3(apiUrl, company.rmmToken!, fallbackApiUrl);
+      const escapedForPs2exe = agentContent.replace(/^'@/gm, '`@');
+      const ps2exeScript = `# ============================================================
+# Compilador de Agente RMM para EXE - Winner Tecnologia
+# Empresa: ${company.name}
+# Requer: Install-Module ps2exe (executar uma vez)
+# Execute como Administrador
+# ============================================================
+
+$ErrorActionPreference = "Stop"
+$OutputDir = "$env:TEMP\\WinnerRMM_Build"
+$AgentPs1 = "$OutputDir\\agente_rmm.ps1"
+$AgentExe = "$OutputDir\\WinnerRMM_Agent.exe"
+
+Write-Host "Winner Tecnologia - Compilador de Agente RMM" -ForegroundColor Cyan
+Write-Host ""
+
+# Verificar/instalar ps2exe
+if (-not (Get-Module -ListAvailable -Name ps2exe)) {
+    Write-Host "Instalando ps2exe..." -ForegroundColor Yellow
+    Install-Module ps2exe -Force -Scope CurrentUser
+}
+
+# Criar diretorio de build
+New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null
+
+# Gravar agente
+$agentContent = @'
+${escapedForPs2exe}
+'@
+Set-Content -LiteralPath $AgentPs1 -Value $agentContent -Encoding UTF8 -Force
+
+# Compilar para EXE
+Write-Host "Compilando para EXE..." -ForegroundColor Cyan
+Invoke-ps2exe -inputFile $AgentPs1 -outputFile $AgentExe \`
+    -title "Winner RMM Agent" \`
+    -description "Agente de monitoramento remoto - Winner Tecnologia" \`
+    -company "Winner Tecnologia" \`
+    -version "3.0.0" \`
+    -noConsole \`
+    -requireAdmin
+
+if (Test-Path $AgentExe) {
+    Write-Host ""
+    Write-Host "Compilacao concluida!" -ForegroundColor Green
+    Write-Host "EXE gerado em: $AgentExe" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "Para instalar como service, copie o EXE para C:\\ProgramData\\WinnerRMM\\" -ForegroundColor Yellow
+    Write-Host "e use NSSM: nssm install WinnerRMMService $AgentExe" -ForegroundColor Yellow
+    explorer.exe /select, $AgentExe
+} else {
+    Write-Host "Erro na compilacao!" -ForegroundColor Red
+}
+
+Read-Host "Pressione Enter para fechar"
+`;
+      return new NextResponse(ps2exeScript, {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Disposition': `attachment; filename="Compilar_Agente_EXE_${safeName}.ps1"`,
+        },
+      });
+    }
+
+    // Download do watchdog separado
+    if (format === 'watchdog') {
+      const fallbackApiUrl = apiUrl.includes('wticorp.com.br')
+        ? 'https://winner-tecnologia-si-aq2c13.abacusai.app/api/rmm'
+        : apiUrl.includes('abacusai.app') ? 'https://www.wticorp.com.br/api/rmm' : '';
+      const content = loadWatchdogV3(apiUrl, company.rmmToken!, fallbackApiUrl);
+      return new NextResponse(content, {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Disposition': `attachment; filename="watchdog_${safeName}.ps1"`,
         },
       });
     }

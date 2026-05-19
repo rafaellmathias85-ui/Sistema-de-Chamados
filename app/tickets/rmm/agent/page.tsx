@@ -17,6 +17,9 @@ import {
   AlertTriangle,
   Shield,
   Trash2,
+  Cpu,
+  Eye,
+  Package,
 } from 'lucide-react';
 
 interface CompanyOption {
@@ -203,7 +206,7 @@ export default function AgentGeneratorPage() {
             3. Baixar Arquivos
           </h2>
 
-          {/* Instalador principal */}
+          {/* Instalador principal V3 */}
           <button
             onClick={() => handleDownload('installer')}
             disabled={generating}
@@ -213,27 +216,45 @@ export default function AgentGeneratorPage() {
               <Shield size={28} className="text-accent-blue" />
             </div>
             <div className="text-left flex-1">
-              <span className="tm-text font-semibold text-lg block">⭐ Instalador Completo (Agente V2)</span>
-              <span className="tm-text-secondary text-sm">PowerShell autossuficiente — instala o agente v2 modular + registra como serviço SYSTEM</span>
+              <span className="tm-text font-semibold text-lg block">⭐ Instalador Completo V3 (Windows Service + NSSM)</span>
+              <span className="tm-text-secondary text-sm">Windows Service via NSSM + Watchdog + DACL anti-tamper + SCM auto-recovery + dual-server fallback</span>
               <span className="text-accent-blue text-xs block mt-1">Instalar_RMM_Winner_*.ps1 · Recomendado para GPO / Intune</span>
             </div>
           </button>
 
           {/* Downloads extras */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             <button
               onClick={() => handleDownload('agent_ps1')}
               disabled={generating}
               className="flex flex-col items-center gap-2 p-4 tm-bg-card border tm-border rounded-xl hover:bg-white/10 hover:border-accent-blue/30 transition disabled:opacity-50"
             >
               <Terminal size={24} className="text-cyan-400" />
-              <span className="tm-text font-medium text-sm">Agente V2 PowerShell</span>
-              <span className="tm-text-muted text-xs">agente_rmm.ps1 (v2)</span>
+              <span className="tm-text font-medium text-sm">Agente V3 PS1</span>
+              <span className="tm-text-muted text-xs">agente_rmm_v3.ps1</span>
+            </button>
+            <button
+              onClick={() => handleDownload('watchdog')}
+              disabled={generating}
+              className="flex flex-col items-center gap-2 p-4 tm-bg-card border tm-border rounded-xl hover:bg-white/10 hover:border-green-400/30 transition disabled:opacity-50"
+            >
+              <Eye size={24} className="text-green-400" />
+              <span className="tm-text font-medium text-sm">Watchdog V3</span>
+              <span className="tm-text-muted text-xs">watchdog.ps1</span>
+            </button>
+            <button
+              onClick={() => handleDownload('ps2exe')}
+              disabled={generating}
+              className="flex flex-col items-center gap-2 p-4 tm-bg-card border tm-border rounded-xl hover:bg-white/10 hover:border-purple-400/30 transition disabled:opacity-50"
+            >
+              <Cpu size={24} className="text-purple-400" />
+              <span className="tm-text font-medium text-sm">Compilar EXE</span>
+              <span className="tm-text-muted text-xs">ps2exe (Melhoria H)</span>
             </button>
             <button
               onClick={() => handleDownload('agent_py')}
               disabled={generating}
-              className="flex flex-col items-center gap-2 p-4 tm-bg-card border tm-border rounded-xl hover:bg-white/10 hover:border-accent-blue/30 transition disabled:opacity-50"
+              className="flex flex-col items-center gap-2 p-4 tm-bg-card border tm-border rounded-xl hover:bg-white/10 hover:border-yellow-400/30 transition disabled:opacity-50"
             >
               <FileCode size={24} className="text-yellow-400" />
               <span className="tm-text font-medium text-sm">Agente Python</span>
@@ -261,15 +282,16 @@ export default function AgentGeneratorPage() {
       >
         <h3 className="text-blue-400 font-semibold mb-3 flex items-center gap-2">
           <Info size={18} />
-          Instruções de Instalação
+          Instruções de Instalação V3
         </h3>
         <div className="space-y-4 text-sm">
           <div>
             <h4 className="tm-text font-medium mb-1">📦 Instalação Manual (1 máquina)</h4>
             <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
-              <li>Baixe o <strong>Instalador Completo</strong> (.ps1)</li>
+              <li>Baixe o <strong>Instalador Completo V3</strong> (.ps1)</li>
               <li>Na máquina alvo, clique com botão direito no arquivo → <strong>Executar com PowerShell como Admin</strong></li>
-              <li>O agente será instalado e iniciado automaticamente</li>
+              <li>O instalador baixa NSSM, registra o agente como Windows Service e configura o watchdog</li>
+              <li>Verifique em <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">services.msc</code> que &quot;Winner RMM Agent&quot; está rodando</li>
             </ol>
           </div>
 
@@ -284,11 +306,23 @@ export default function AgentGeneratorPage() {
           </div>
 
           <div>
-            <h4 className="tm-text font-medium mb-1">🐍 Alternativa Python (avançado)</h4>
+            <h4 className="tm-text font-medium mb-1">🛡️ Proteções do V3</h4>
+            <ul className="tm-text space-y-1 list-disc list-inside ml-2">
+              <li><strong>Windows Service (NSSM)</strong> — Não é removido por antivírus/EDR como Scheduled Tasks</li>
+              <li><strong>SCM Auto-Recovery</strong> — Se o service crashar, reinicia em 10s/30s/60s automaticamente</li>
+              <li><strong>Watchdog Independente</strong> — Task que verifica a cada 15 min se o service existe e o recria</li>
+              <li><strong>DACL Anti-Tamper</strong> — Diretório protegido: apenas SYSTEM tem FullControl</li>
+              <li><strong>Dual-Server Fallback</strong> — Se um servidor cair, usa o outro automaticamente</li>
+              <li><strong>Self-Update</strong> — Verifica atualizações a cada 6h e aplica automaticamente</li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="tm-text font-medium mb-1">⚡ Compilar como EXE (opcional)</h4>
             <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
-              <li>Baixe o <strong>Agente Python</strong> (.py)</li>
-              <li>Instale dependências: <code className="bg-black/30 px-2 py-0.5 rounded text-green-400">pip install psutil requests wmi</code></li>
-              <li>Compile: <code className="bg-black/30 px-2 py-0.5 rounded text-green-400">pyinstaller --onefile --noconsole agente_rmm.py</code></li>
+              <li>Baixe o script <strong>Compilar EXE</strong></li>
+              <li>Execute como Admin — ele instala ps2exe e gera WinnerRMM_Agent.exe</li>
+              <li>Use o EXE com NSSM para maior proteção contra engenharia reversa</li>
             </ol>
           </div>
         </div>

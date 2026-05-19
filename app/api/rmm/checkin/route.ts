@@ -16,6 +16,8 @@ export async function POST(request: NextRequest) {
       // Hardware extras
       serial_number, manufacturer, machine_model,
       memory_slots_total, memory_slots_used, memory_modules,
+      // Agent version (V3+)
+      agent_version,
     } = body;
 
     if (!token || !hostname) {
@@ -56,6 +58,8 @@ export async function POST(request: NextRequest) {
         ? memory_modules
         : JSON.stringify(memory_modules);
     }
+    // Melhoria E (V3): Agent version tracking
+    if (agent_version !== undefined) extendedData.agentVersion = agent_version || null;
 
     const baseData = {
       username: user || null,

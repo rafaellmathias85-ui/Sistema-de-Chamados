@@ -2,64 +2,71 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
 
-// GET /api/rmm/agent/check-update?token=xxx&current_version=1.0.0&agent_type=ps1&channel=stable
-// Chamado pelo agente para verificar se há update disponível
-// Autenticação via token da empresa (mesmo do checkin)
-export async function GET(request: NextRequest) {
+// POST /api/rmm/agent/check-update
+// Agente consulta se existe atualização disponível
+export async function POST(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const token = searchParams.get('token');
-    const currentVersion = searchParams.get('current_version');
-    const agentType = searchParams.get('agent_type') || 'ps1';
-    const channel = searchParams.get('channel') || 'stable';
+    const body = await request.json();
+    const { hostname, current_version } = body;
+    const authHeader = request.headers.get('authorization');
+    const token = authHeader?.replace('Bearer ', '');
 
-    if (!token) {
-      return NextResponse.json({ error: 'Token obrigatório' }, { status: 400 });
+    if (!token || !hostname) {
+      return NextResponse.json({ error: 'Token e hostname obrigatórios' }, { status: 400 });
     }
 
     // Validar token da empresa
     const company = await prisma.company.findUnique({
       where: { rmmToken: token },
     });
+
     if (!company) {
       return NextResponse.json({ error: 'Token inválido' }, { status: 401 });
     }
 
-    // Buscar versão mais recente ativa para o tipo e canal
-    const latestVersion = await prisma.agentVersion.findFirst({
-      where: {
-        agentType,
-        channel,
-        isActive: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!latestVersion) {
-      return NextResponse.json({
-        update_available: false,
-        current_version: currentVersion,
-        message: 'Nenhuma versão disponível para este tipo e canal',
-      });
+    // Ler versão atual do template no servidor
+    const templatePath = path.join(process.cwd(), 'public', 'rmm', 'WinnerRMM-AgentV3.ps1');
+    if (!fs.existsSync(templatePath)) {
+      return NextResponse.json({ update_available: false });
     }
 
+    const templateContent = fs.readFileSync(templatePath, 'utf-8');
+    const versionMatch = templateContent.match(/\$AGENT_VERSION\s*=\s*"([^"]+)"/);
+    const serverVersion = versionMatch ? versionMatch[1] : '3.0.0';
+
     // Comparar versões
-    const needsUpdate = currentVersion !== latestVersion.version;
+    if (!current_version || current_version === serverVersion) {
+      return NextResponse.json({ update_available: false, current_version: serverVersion });
+    }
+
+    // Versão diferente — gerar URL de download e hash
+    const forwardedHost = request.headers.get('x-forwarded-host');
+    const host = forwardedHost || request.headers.get('host') || '';
+    const proto = request.headers.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
+    const baseUrl = `${proto}://${host}`;
+    const apiUrl = baseUrl + '/api/rmm';
+
+    // Gerar conteúdo personalizado para a empresa
+    const personalizedContent = templateContent
+      .replace(/\{\{API_URL\}\}/g, apiUrl)
+      .replace(/\{\{COMPANY_TOKEN\}\}/g, company.rmmToken!)
+      .replace(/\{\{FALLBACK_API_URL\}\}/g, '');
+
+    const sha256 = crypto.createHash('sha256').update(personalizedContent, 'utf-8').digest('hex').toUpperCase();
 
     return NextResponse.json({
-      update_available: needsUpdate,
-      current_version: currentVersion,
-      latest_version: latestVersion.version,
-      is_critical: latestVersion.isCritical,
-      download_url: latestVersion.downloadUrl,
-      file_hash_sha256: latestVersion.fileHashSha256,
-      file_size_bytes: latestVersion.fileSizeBytes.toString(),
-      changelog: latestVersion.changelog,
-      min_os_version: latestVersion.minOsVersion,
+      update_available: true,
+      current_version: current_version,
+      new_version: serverVersion,
+      download_url: `${baseUrl}/api/rmm/agent?format=agent_ps1&companyId=${company.id}&token=${company.rmmToken}`,
+      sha256_hash: sha256,
     });
   } catch (error) {
-    console.error('Error checking agent update:', error);
+    console.error('Check-update error:', error);
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
   }
 }
