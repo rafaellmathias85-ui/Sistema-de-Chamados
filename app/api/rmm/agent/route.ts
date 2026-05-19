@@ -244,9 +244,30 @@ if (Test-Path $NssmExe) {
 & sc.exe failure $ServiceName reset= 86400 actions= restart/10000/restart/30000/restart/60000 2>&1 | Out-Null
 Write-Host "       SCM failure recovery configurado (10s/30s/60s)" -ForegroundColor Green
 
-# Iniciar o service
-& sc.exe start $ServiceName 2>&1 | Out-Null
-Start-Sleep -Seconds 3
+# Iniciar o service (com retry)
+$svcStarted = $false
+for ($startAttempt = 1; $startAttempt -le 3; $startAttempt++) {
+    if (Test-Path $NssmExe) {
+        & $NssmExe start $ServiceName 2>&1 | Out-Null
+    } else {
+        & sc.exe start $ServiceName 2>&1 | Out-Null
+    }
+    Start-Sleep -Seconds 5
+    $svcState = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if ($svcState -and $svcState.Status -eq 'Running') {
+        $svcStarted = $true
+        break
+    }
+    Write-Host "       Tentativa $startAttempt/3 - service ainda nao iniciou, aguardando..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 3
+}
+if (-not $svcStarted) {
+    Write-Host "       [DIAG] Verificando logs de erro do service..." -ForegroundColor Yellow
+    if (Test-Path "$InstallDir\\service_stderr.log") {
+        $errContent = Get-Content "$InstallDir\\service_stderr.log" -Tail 10 -ErrorAction SilentlyContinue
+        if ($errContent) { $errContent | ForEach-Object { Write-Host "              $_" -ForegroundColor DarkGray } }
+    }
+}
 
 # Registrar watchdog como Scheduled Task (redundancia)
 Write-Host "[7/7] Registrando watchdog (Scheduled Task)..." -ForegroundColor Cyan
@@ -291,6 +312,40 @@ try {
 # Verificar status final
 $svcCheck = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 $svcStatus = if ($svcCheck -and $svcCheck.Status -eq 'Running') { "RODANDO" } else { "VERIFICAR" }
+
+# Se nao esta rodando, diagnosticar
+if ($svcStatus -ne "RODANDO" -and $svcCheck) {
+    Write-Host ""
+    Write-Host "  [DIAGNOSTICO] Service nao esta rodando. Status: $($svcCheck.Status)" -ForegroundColor Yellow
+    # Tentar iniciar uma ultima vez e mostrar erro
+    try {
+        Start-Service -Name $ServiceName -ErrorAction Stop
+        Start-Sleep -Seconds 5
+        $svcCheck2 = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($svcCheck2 -and $svcCheck2.Status -eq 'Running') {
+            $svcStatus = "RODANDO"
+            Write-Host "  [DIAGNOSTICO] Service iniciou com sucesso na tentativa final!" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  [DIAGNOSTICO] Erro ao iniciar: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    if ($svcStatus -ne "RODANDO") {
+        Write-Host "  [DIAGNOSTICO] O watchdog tentara iniciar o service em 15 minutos" -ForegroundColor Yellow
+        Write-Host "  [DIAGNOSTICO] Verifique o log: $InstallDir\\service_stderr.log" -ForegroundColor Yellow
+        # Verificar se o agente roda manualmente
+        Write-Host "  [DIAGNOSTICO] Testando execucao manual do agente..." -ForegroundColor DarkGray
+        $testProc = Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+        if ($testProc) {
+            Start-Sleep -Seconds 5
+            if (-not $testProc.HasExited) {
+                Write-Host "  [DIAGNOSTICO] Agente executa normalmente. O problema pode ser permissao do NSSM." -ForegroundColor Yellow
+                $testProc.Kill()
+            } else {
+                Write-Host "  [DIAGNOSTICO] Agente crashou em <5s. ExitCode: $($testProc.ExitCode)" -ForegroundColor Red
+            }
+        }
+    }
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
