@@ -153,6 +153,30 @@ ${escapedWatchdog}
 Set-Content -LiteralPath $WatchdogFile -Value $watchdogContent -Encoding UTF8 -Force
 
 Write-Host "[5/7] Baixando e instalando NSSM (Service Manager)..." -ForegroundColor Cyan
+
+# Funcao universal de extracao ZIP (compativel PS 2.0+)
+function Extract-ZipCompat {
+    param([string]$ZipFile, [string]$Destination)
+    if (Test-Path $Destination) { Remove-Item $Destination -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    # Metodo 1: Expand-Archive (PS 5.0+)
+    if (Get-Command Expand-Archive -ErrorAction SilentlyContinue) {
+        Expand-Archive -Path $ZipFile -DestinationPath $Destination -Force
+        return
+    }
+    # Metodo 2: .NET System.IO.Compression.ZipFile (.NET 4.5+)
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipFile, $Destination)
+        return
+    } catch {}
+    # Metodo 3: Shell.Application COM (funciona ate no PS 2.0 / Windows 7)
+    $shell = New-Object -ComObject Shell.Application
+    $zip = $shell.NameSpace((Resolve-Path $ZipFile).Path)
+    $dest = $shell.NameSpace((Resolve-Path $Destination).Path)
+    $dest.CopyHere($zip.Items(), 0x14)
+}
+
 if (!(Test-Path $NssmExe)) {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $nssmDownloaded = $false
@@ -165,7 +189,7 @@ if (!(Test-Path $NssmExe)) {
                 throw "Download corrompido (tamanho muito pequeno)"
             }
             $extractDir = "$InstallDir\\nssm_extract"
-            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+            Extract-ZipCompat -ZipFile $zipPath -Destination $extractDir
             $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Where-Object {
                 $_.DirectoryName -match "win64"
             } | Select-Object -First 1
