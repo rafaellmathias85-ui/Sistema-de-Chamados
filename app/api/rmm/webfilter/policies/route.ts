@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       name, companyId, mode, blockedDomains, allowedDomains,
       blockedCategories, allowedCategories, blockedKeywords,
       scheduleEnabled, scheduleStart, scheduleEnd, scheduleDays,
-      blockPageMessage, logOnly, safeSearch, priority,
+      blockPageMessage, logOnly, safeSearch, priority, machineIds,
     } = body;
 
     if (!name) return NextResponse.json({ error: 'name obrigatório' }, { status: 400 });
@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
         logOnly: logOnly || false,
         safeSearch: safeSearch ?? true,
         priority: priority || 100,
+        machineIds: machineIds || [],
         createdById: session.user.id,
         tenantId: session.user.tenantId || null,
       },

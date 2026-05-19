@@ -61,6 +61,7 @@ export async function PATCH(
     if (body.scheduleEnd !== undefined) updateData.scheduleEnd = body.scheduleEnd;
     if (body.scheduleDays !== undefined) updateData.scheduleDays = body.scheduleDays;
     if (body.blockPageMessage !== undefined) updateData.blockPageMessage = body.blockPageMessage;
+    if (body.machineIds !== undefined) updateData.machineIds = body.machineIds;
 
     const policy = await prisma.webFilterPolicy.update({
       where: { id: params.id },

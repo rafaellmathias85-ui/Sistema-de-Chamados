@@ -1788,6 +1788,7 @@ model WebFilterPolicy {
   blockedCategories String[]  @default([]) // IDs das categorias bloqueadas
   allowedCategories String[]  @default([])
   blockedKeywords   String[]  @default([])
+  machineIds        String[]  @default([]) // IDs das máquinas (vazio = todas da empresa)
   scheduleEnabled   Boolean   @default(false)
   scheduleStart     String?   // TIME como string (HH:mm)
   scheduleEnd       String?

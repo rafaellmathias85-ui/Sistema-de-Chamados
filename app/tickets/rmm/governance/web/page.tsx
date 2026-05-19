@@ -7,7 +7,7 @@ import Link from 'next/link';
 import {
   Globe, ChevronLeft, Search, Loader2,
   Shield, Plus, Trash2, Check, X, Tag, Edit2,
-  Building2, ToggleLeft, ToggleRight,
+  Building2, ToggleLeft, ToggleRight, Monitor, CheckSquare, Square,
 } from 'lucide-react';
 import MachineFilter from '@/components/rmm/machine-filter';
 
@@ -37,6 +37,12 @@ interface BrowsingEntry {
   machine: { hostname: string; company: { id: string; name: string } };
 }
 
+interface MachineOption {
+  id: string;
+  hostname: string;
+  status: string;
+}
+
 interface WfPolicy {
   id: string;
   name: string;
@@ -48,6 +54,7 @@ interface WfPolicy {
   allowedDomains: string[];
   blockedCategories: string[];
   blockedKeywords: string[];
+  machineIds: string[];
   logOnly: boolean;
   safeSearch: boolean;
   priority: number;
@@ -83,6 +90,9 @@ export default function WebPage() {
   const [filterMachine, setFilterMachine] = useState('');
   const [domainInputs, setDomainInputs] = useState<Record<string, string>>({});
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
+  const [companyMachines, setCompanyMachines] = useState<MachineOption[]>([]);
+  const [loadingMachines, setLoadingMachines] = useState(false);
+  const [allMachinesSelected, setAllMachinesSelected] = useState(true);
 
   // Form: nova política
   const [polForm, setPolForm] = useState({
@@ -92,6 +102,7 @@ export default function WebPage() {
     blockedDomains: '' as string,
     blockedCategories: [] as string[],
     blockedKeywords: '' as string,
+    machineIds: [] as string[],
     logOnly: false,
     safeSearch: true,
   });
@@ -100,15 +111,41 @@ export default function WebPage() {
   const [catForm, setCatForm] = useState({ name: '', slug: '', description: '' });
   const [formType, setFormType] = useState<'policy' | 'category'>('policy');
 
-  // Carregar empresas
+  // Carregar empresas (API retorna { companies: [...], total, page, totalPages })
   useEffect(() => {
-    fetch('/api/companies')
+    fetch('/api/companies?limit=500')
       .then(r => r.json())
       .then(data => {
-        const list = Array.isArray(data) ? data : [];
+        const list = Array.isArray(data) ? data : (data?.companies || []);
         setCompanies(list.map((c: any) => ({ id: c.id, name: c.name })).sort((a: CompanyOption, b: CompanyOption) => a.name.localeCompare(b.name)));
       }).catch(() => {});
   }, []);
+
+  // Carregar máquinas quando empresa muda
+  useEffect(() => {
+    if (!polForm.companyId) {
+      setCompanyMachines([]);
+      setAllMachinesSelected(true);
+      setPolForm(p => ({ ...p, machineIds: [] }));
+      return;
+    }
+    setLoadingMachines(true);
+    fetch(`/api/rmm/machines?companyId=${polForm.companyId}`)
+      .then(r => r.json())
+      .then(data => {
+        const machines = (Array.isArray(data) ? data : []).map((m: any) => ({
+          id: m.id,
+          hostname: m.hostname,
+          status: m.status || 'Offline',
+        }));
+        setCompanyMachines(machines);
+        setAllMachinesSelected(true);
+        setPolForm(p => ({ ...p, machineIds: [] }));
+      })
+      .catch(() => setCompanyMachines([]))
+      .finally(() => setLoadingMachines(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [polForm.companyId]);
 
   const loadBrowsing = useCallback(async () => {
     if (!filterMachine) { setBrowsing([]); return; }
@@ -150,6 +187,7 @@ export default function WebPage() {
         blockedDomains: polForm.blockedDomains ? polForm.blockedDomains.split(',').map(d => d.trim()).filter(Boolean) : [],
         blockedCategories: polForm.blockedCategories,
         blockedKeywords: polForm.blockedKeywords ? polForm.blockedKeywords.split(',').map(k => k.trim()).filter(Boolean) : [],
+        machineIds: allMachinesSelected ? [] : polForm.machineIds,
         logOnly: polForm.logOnly,
         safeSearch: polForm.safeSearch,
       };
@@ -161,7 +199,9 @@ export default function WebPage() {
       if (res.ok) {
         await loadPolicies();
         setShowForm(false);
-        setPolForm({ name: '', companyId: '', mode: 'blacklist', blockedDomains: '', blockedCategories: [], blockedKeywords: '', logOnly: false, safeSearch: true });
+        setAllMachinesSelected(true);
+        setCompanyMachines([]);
+        setPolForm({ name: '', companyId: '', mode: 'blacklist', blockedDomains: '', blockedCategories: [], blockedKeywords: '', machineIds: [], logOnly: false, safeSearch: true });
       }
     } finally { setSaving(false); }
   };
@@ -416,6 +456,77 @@ export default function WebPage() {
                   </div>
                 </div>
 
+                {/* Seleção de máquinas (aparece quando empresa está selecionada) */}
+                {polForm.companyId && (
+                  <div className="tm-bg-card border tm-border rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs tm-text-secondary flex items-center gap-1.5">
+                        <Monitor size={14} /> Máquinas da empresa
+                      </label>
+                      {loadingMachines && <Loader2 size={14} className="animate-spin tm-text-muted" />}
+                    </div>
+
+                    {!loadingMachines && companyMachines.length === 0 && (
+                      <p className="text-xs tm-text-muted">Nenhuma máquina encontrada para esta empresa.</p>
+                    )}
+
+                    {companyMachines.length > 0 && (
+                      <>
+                        <label className="flex items-center gap-2 text-sm tm-text cursor-pointer">
+                          <input type="checkbox" checked={allMachinesSelected}
+                            onChange={() => {
+                              setAllMachinesSelected(!allMachinesSelected);
+                              setPolForm(p => ({ ...p, machineIds: [] }));
+                            }} />
+                          <span className="font-medium">Todas as máquinas ({companyMachines.length})</span>
+                        </label>
+
+                        {!allMachinesSelected && (
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                            {companyMachines.map(m => {
+                              const isSelected = polForm.machineIds.includes(m.id);
+                              return (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setPolForm(p => ({
+                                      ...p,
+                                      machineIds: isSelected
+                                        ? p.machineIds.filter(x => x !== m.id)
+                                        : [...p.machineIds, m.id],
+                                    }));
+                                  }}
+                                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs border transition-colors text-left ${
+                                    isSelected
+                                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                                      : 'tm-border tm-text hover:bg-white/5'
+                                  }`}
+                                >
+                                  {isSelected ? <CheckSquare size={14} /> : <Square size={14} className="tm-text-muted" />}
+                                  <div className="min-w-0">
+                                    <div className="truncate font-medium">{m.hostname}</div>
+                                    <div className={`text-[10px] ${m.status === 'Ligado' ? 'text-green-400' : 'tm-text-muted'}`}>
+                                      {m.status === 'Ligado' ? '● Online' : '○ Offline'}
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {!allMachinesSelected && polForm.machineIds.length > 0 && (
+                          <p className="text-xs text-blue-400">{polForm.machineIds.length} máquina(s) selecionada(s)</p>
+                        )}
+                        {!allMachinesSelected && polForm.machineIds.length === 0 && (
+                          <p className="text-xs text-yellow-400">Selecione pelo menos uma máquina</p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs tm-text-secondary">Modo</label>
@@ -499,6 +610,11 @@ export default function WebPage() {
                         ) : (
                           <span className="text-yellow-400">Global</span>
                         )}
+                        {p.machineIds?.length > 0 ? (
+                          <span className="flex items-center gap-1"><Monitor size={10} /> {p.machineIds.length} máquina(s)</span>
+                        ) : p.companyId ? (
+                          <span className="flex items-center gap-1"><Monitor size={10} /> Todas as máquinas</span>
+                        ) : null}
                         {p.blockedDomains?.length > 0 && <span>{p.blockedDomains.length} domínio(s)</span>}
                         {p.blockedCategories?.length > 0 && <span>{p.blockedCategories.length} categoria(s)</span>}
                         {p.logOnly && <span className="text-yellow-400">Apenas log</span>}
