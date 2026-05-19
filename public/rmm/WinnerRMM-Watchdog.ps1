@@ -19,7 +19,15 @@ $NssmExe = "$InstallDir\nssm.exe"
 $AgentFile = "$InstallDir\agente_rmm.ps1"
 $ServiceName = "WinnerRMMService"
 $VersionFile = "$InstallDir\agent_version"
-$NssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
+# Extrair base URL (sem /api/rmm) para assets estaticos
+$BASE_SITE_URL = $API_URL -replace '/api/rmm/?$', ''
+$FALLBACK_SITE_URL = $FALLBACK_API_URL -replace '/api/rmm/?$', ''
+$NssmUrls = @(
+    "$BASE_SITE_URL/rmm/nssm-2.24-win64.zip",
+    "$FALLBACK_SITE_URL/rmm/nssm-2.24-win64.zip",
+    "https://github.com/ONLYOFFICE/nssm/releases/download/v2.24/nssm_x64.zip",
+    "https://nssm.cc/release/nssm-2.24.zip"
+)
 
 # Forcar TLS 1.2+
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13 } catch {
@@ -42,30 +50,38 @@ function Write-WatchdogLog($msg) {
 # ============ NSSM MANAGEMENT ============
 function Ensure-Nssm {
     if (Test-Path $NssmExe) { return $true }
-    Write-WatchdogLog "NSSM nao encontrado. Baixando..."
-    try {
-        $zipPath = "$InstallDir\nssm.zip"
-        Invoke-WebRequest -Uri $NssmUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
-        $extractDir = "$InstallDir\nssm_extract"
-        Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
-        # NSSM zip contem subpasta com versao. Encontrar o exe 64-bit
-        $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Where-Object {
-            $_.DirectoryName -match "win64"
-        } | Select-Object -First 1
-        if (-not $found) {
-            $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Select-Object -First 1
+    Write-WatchdogLog "NSSM nao encontrado. Tentando download com fallback..."
+    foreach ($nssmUrl in $NssmUrls) {
+        try {
+            Write-WatchdogLog "Tentando: $nssmUrl"
+            $zipPath = "$InstallDir\nssm.zip"
+            Invoke-WebRequest -Uri $nssmUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+            if ((Get-Item $zipPath).Length -lt 10000) {
+                throw "Download corrompido"
+            }
+            $extractDir = "$InstallDir\nssm_extract"
+            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+            $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Where-Object {
+                $_.DirectoryName -match "win64"
+            } | Select-Object -First 1
+            if (-not $found) {
+                $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Select-Object -First 1
+            }
+            if ($found) {
+                Copy-Item -Path $found.FullName -Destination $NssmExe -Force
+                Write-WatchdogLog "NSSM instalado: $NssmExe"
+            }
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $NssmExe) { return $true }
+        } catch {
+            Write-WatchdogLog "Falha em ${nssmUrl}: $($_.Exception.Message)"
+            Remove-Item "$InstallDir\nssm.zip" -Force -ErrorAction SilentlyContinue
+            Remove-Item "$InstallDir\nssm_extract" -Recurse -Force -ErrorAction SilentlyContinue
         }
-        if ($found) {
-            Copy-Item -Path $found.FullName -Destination $NssmExe -Force
-            Write-WatchdogLog "NSSM instalado: $NssmExe"
-        }
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-        Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-        return (Test-Path $NssmExe)
-    } catch {
-        Write-WatchdogLog "Erro ao baixar NSSM: $($_.Exception.Message)"
-        return $false
     }
+    Write-WatchdogLog "ERRO: Nenhuma URL do NSSM funcionou"
+    return $false
 }
 
 function Install-WinnerService {

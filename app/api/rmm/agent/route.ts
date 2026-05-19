@@ -57,6 +57,11 @@ function generateFullInstaller(apiUrl: string, companyToken: string, companyName
   const agentContent = loadAgentV3(apiUrl, companyToken, fallbackApiUrl);
   const watchdogContent = loadWatchdogV3(apiUrl, companyToken, fallbackApiUrl);
 
+  // Base URLs para download de assets estaticos (public/)
+  // apiUrl = https://www.wticorp.com.br/api/rmm → baseUrl = https://www.wticorp.com.br
+  const baseUrl = apiUrl.replace(/\/api\/rmm\/?$/, '');
+  const fallbackBaseUrl = fallbackApiUrl ? fallbackApiUrl.replace(/\/api\/rmm\/?$/, '') : '';
+
   // ATENCAO: o agente e embutido como here-string PowerShell @' ... '@ (literal, sem expansao
   // de variaveis). NAO usar Base64+FromBase64String pois EDR/AV detectam esse padrao.
   const escapedAgent = agentContent.replace(/^'@/gm, '`@');
@@ -78,7 +83,12 @@ $WatchdogFile = "$InstallDir\\watchdog.ps1"
 $NssmExe = "$InstallDir\\nssm.exe"
 $ServiceName = "WinnerRMMService"
 $WatchdogTaskName = "WinnerRMMWatchdog"
-$NssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
+$NssmUrls = @(
+    "${baseUrl}/rmm/nssm-2.24-win64.zip",
+    "${fallbackBaseUrl}/rmm/nssm-2.24-win64.zip",
+    "https://github.com/ONLYOFFICE/nssm/releases/download/v2.24/nssm_x64.zip",
+    "https://nssm.cc/release/nssm-2.24.zip"
+)
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -144,29 +154,42 @@ Set-Content -LiteralPath $WatchdogFile -Value $watchdogContent -Encoding UTF8 -F
 
 Write-Host "[5/7] Baixando e instalando NSSM (Service Manager)..." -ForegroundColor Cyan
 if (!(Test-Path $NssmExe)) {
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $zipPath = "$InstallDir\\nssm.zip"
-        Invoke-WebRequest -Uri $NssmUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
-        $extractDir = "$InstallDir\\nssm_extract"
-        Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
-        $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Where-Object {
-            $_.DirectoryName -match "win64"
-        } | Select-Object -First 1
-        if (-not $found) {
-            $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Select-Object -First 1
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $nssmDownloaded = $false
+    foreach ($nssmUrl in $NssmUrls) {
+        try {
+            Write-Host "       Tentando: $nssmUrl" -ForegroundColor DarkGray
+            $zipPath = "$InstallDir\\nssm.zip"
+            Invoke-WebRequest -Uri $nssmUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+            if ((Get-Item $zipPath).Length -lt 10000) {
+                throw "Download corrompido (tamanho muito pequeno)"
+            }
+            $extractDir = "$InstallDir\\nssm_extract"
+            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+            $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Where-Object {
+                $_.DirectoryName -match "win64"
+            } | Select-Object -First 1
+            if (-not $found) {
+                $found = Get-ChildItem -Path $extractDir -Recurse -Filter "nssm.exe" | Select-Object -First 1
+            }
+            if ($found) {
+                Copy-Item -Path $found.FullName -Destination $NssmExe -Force
+                Write-Host "       NSSM instalado com sucesso" -ForegroundColor Green
+                $nssmDownloaded = $true
+            } else {
+                throw "NSSM.exe nao encontrado no ZIP"
+            }
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+            break
+        } catch {
+            Write-Host "       [FALHA] $($_.Exception.Message)" -ForegroundColor Yellow
+            Remove-Item "$InstallDir\\nssm.zip" -Force -ErrorAction SilentlyContinue
+            Remove-Item "$InstallDir\\nssm_extract" -Recurse -Force -ErrorAction SilentlyContinue
         }
-        if ($found) {
-            Copy-Item -Path $found.FullName -Destination $NssmExe -Force
-            Write-Host "       NSSM instalado com sucesso" -ForegroundColor Green
-        } else {
-            throw "NSSM.exe nao encontrado no ZIP"
-        }
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-        Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-    } catch {
-        Write-Host "       [AVISO] Erro ao baixar NSSM: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host "       Tentando fallback com sc.exe..." -ForegroundColor Yellow
+    }
+    if (-not $nssmDownloaded) {
+        Write-Host "       [AVISO] Nenhuma URL do NSSM funcionou. Usando fallback sc.exe..." -ForegroundColor Yellow
     }
 }
 
