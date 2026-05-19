@@ -63,11 +63,27 @@ export async function PATCH(
     if (body.blockPageMessage !== undefined) updateData.blockPageMessage = body.blockPageMessage;
     if (body.machineIds !== undefined) updateData.machineIds = body.machineIds;
 
-    const policy = await prisma.webFilterPolicy.update({
-      where: { id: params.id },
-      data: updateData,
-      include: { company: { select: { id: true, name: true } } },
-    });
+    let policy;
+    try {
+      policy = await prisma.webFilterPolicy.update({
+        where: { id: params.id },
+        data: updateData,
+        include: { company: { select: { id: true, name: true } } },
+      });
+    } catch (dbError: any) {
+      // Fallback: se coluna machineIds não existe no banco, tenta sem ela
+      if (dbError?.message?.includes('machineIds') || dbError?.code === 'P2009') {
+        console.warn('Column machineIds not found, retrying without it');
+        delete updateData.machineIds;
+        policy = await prisma.webFilterPolicy.update({
+          where: { id: params.id },
+          data: updateData,
+          include: { company: { select: { id: true, name: true } } },
+        });
+      } else {
+        throw dbError;
+      }
+    }
 
     await logGovernanceAction('policy_updated', 'web_filter_policy', policy.id, session.user.id, null, body);
 

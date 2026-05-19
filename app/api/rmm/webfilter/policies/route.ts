@@ -49,29 +49,41 @@ export async function POST(request: NextRequest) {
 
     if (!name) return NextResponse.json({ error: 'name obrigatório' }, { status: 400 });
 
-    const policy = await prisma.webFilterPolicy.create({
-      data: {
-        name,
-        companyId: companyId || null,
-        mode: mode || 'blacklist',
-        blockedDomains: blockedDomains || [],
-        allowedDomains: allowedDomains || [],
-        blockedCategories: blockedCategories || [],
-        allowedCategories: allowedCategories || [],
-        blockedKeywords: blockedKeywords || [],
-        scheduleEnabled: scheduleEnabled || false,
-        scheduleStart: scheduleStart || null,
-        scheduleEnd: scheduleEnd || null,
-        scheduleDays: scheduleDays || [1, 2, 3, 4, 5],
-        blockPageMessage: blockPageMessage || 'Acesso bloqueado pela política da empresa.',
-        logOnly: logOnly || false,
-        safeSearch: safeSearch ?? true,
-        priority: priority || 100,
-        machineIds: machineIds || [],
-        createdById: session.user.id,
-        tenantId: session.user.tenantId || null,
-      },
-    });
+    const createData: any = {
+      name,
+      companyId: companyId || null,
+      mode: mode || 'blacklist',
+      blockedDomains: blockedDomains || [],
+      allowedDomains: allowedDomains || [],
+      blockedCategories: blockedCategories || [],
+      allowedCategories: allowedCategories || [],
+      blockedKeywords: blockedKeywords || [],
+      scheduleEnabled: scheduleEnabled || false,
+      scheduleStart: scheduleStart || null,
+      scheduleEnd: scheduleEnd || null,
+      scheduleDays: scheduleDays || [1, 2, 3, 4, 5],
+      blockPageMessage: blockPageMessage || 'Acesso bloqueado pela política da empresa.',
+      logOnly: logOnly || false,
+      safeSearch: safeSearch ?? true,
+      priority: priority || 100,
+      machineIds: machineIds || [],
+      createdById: session.user.id,
+      tenantId: session.user.tenantId || null,
+    };
+
+    let policy;
+    try {
+      policy = await prisma.webFilterPolicy.create({ data: createData });
+    } catch (dbError: any) {
+      // Fallback: se coluna machineIds não existe no banco, tenta sem ela
+      if (dbError?.message?.includes('machineIds') || dbError?.code === 'P2009') {
+        console.warn('Column machineIds not found, retrying without it');
+        delete createData.machineIds;
+        policy = await prisma.webFilterPolicy.create({ data: createData });
+      } else {
+        throw dbError;
+      }
+    }
 
     await logGovernanceAction('policy_created', 'web_filter_policy', policy.id, session.user.id, null, body);
 

@@ -177,8 +177,15 @@ export default function WebPage() {
   }, [session, loadBrowsing, loadLogs, loadPolicies, loadCategories]);
 
   // ===== POLÍTICAS =====
+  const [formError, setFormError] = useState('');
+
   const handleCreatePolicy = async () => {
     if (!polForm.name) return;
+    if (!allMachinesSelected && polForm.machineIds.length === 0 && polForm.companyId) {
+      setFormError('Selecione pelo menos uma máquina ou marque "Todas as máquinas".');
+      return;
+    }
+    setFormError('');
     setSaving(true);
     try {
       const payload: any = {
@@ -201,15 +208,26 @@ export default function WebPage() {
         setShowForm(false);
         setAllMachinesSelected(true);
         setCompanyMachines([]);
+        setFormError('');
         setPolForm({ name: '', companyId: '', mode: 'blacklist', blockedDomains: '', blockedCategories: [], blockedKeywords: '', machineIds: [], logOnly: false, safeSearch: true });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setFormError(err?.error || `Erro ao criar política (${res.status}). Verifique os logs do servidor.`);
       }
+    } catch (e: any) {
+      setFormError(`Erro de conexão: ${e.message}`);
     } finally { setSaving(false); }
   };
 
   const handleDeletePolicy = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir esta política?')) return;
     const res = await fetch(`/api/rmm/webfilter/policies/${id}`, { method: 'DELETE' });
-    if (res.ok) await loadPolicies();
+    if (res.ok) {
+      await loadPolicies();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err?.error || `Erro ao excluir política (${res.status})`);
+    }
   };
 
   const handleTogglePolicy = async (id: string, isActive: boolean) => {
@@ -217,7 +235,12 @@ export default function WebPage() {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isActive: !isActive }),
     });
-    if (res.ok) await loadPolicies();
+    if (res.ok) {
+      await loadPolicies();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err?.error || `Erro ao atualizar política (${res.status})`);
+    }
   };
 
   // ===== CATEGORIAS =====
@@ -234,7 +257,12 @@ export default function WebPage() {
         await loadCategories();
         setShowForm(false);
         setCatForm({ name: '', slug: '', description: '' });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.error || `Erro ao criar categoria (${res.status})`);
       }
+    } catch (e: any) {
+      alert(`Erro: ${e.message}`);
     } finally { setSaving(false); }
   };
 
@@ -248,11 +276,18 @@ export default function WebPage() {
     if (res.ok) {
       setDomainInputs(prev => ({ ...prev, [categoryId]: '' }));
       await loadCategories();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err?.error || `Erro ao adicionar domínio (${res.status})`);
     }
   };
 
   const handleRemoveDomain = async (categoryId: string, domainText: string) => {
-    await fetch(`/api/rmm/webfilter/categories/${categoryId}/domains?domain=${encodeURIComponent(domainText)}`, { method: 'DELETE' });
+    const res = await fetch(`/api/rmm/webfilter/categories/${categoryId}/domains?domain=${encodeURIComponent(domainText)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err?.error || `Erro ao remover domínio (${res.status})`);
+    }
     await loadCategories();
   };
 
@@ -580,12 +615,18 @@ export default function WebPage() {
                   </label>
                 </div>
 
+                {formError && (
+                  <div className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                    {formError}
+                  </div>
+                )}
+
                 <div className="flex gap-2">
                   <button onClick={handleCreatePolicy} disabled={saving || !polForm.name}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm disabled:opacity-50">
                     {saving ? 'Salvando...' : 'Criar Política'}
                   </button>
-                  <button onClick={() => setShowForm(false)} className="px-4 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">Cancelar</button>
+                  <button onClick={() => { setShowForm(false); setFormError(''); }} className="px-4 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">Cancelar</button>
                 </div>
               </motion.div>
             )}
