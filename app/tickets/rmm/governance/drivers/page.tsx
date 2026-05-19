@@ -65,8 +65,6 @@ export default function DriversPage() {
   const warningCount = drivers.filter(d => d.status !== 'ok').length;
   const unsignedCount = drivers.filter(d => d.isSigned === false).length;
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-400" size={28} /></div>;
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -93,6 +91,8 @@ export default function DriversPage() {
 
       {/* Machine Filter (empresa + máquina) */}
       <MachineFilter value={filterMachine} onChange={setFilterMachine} />
+
+      {loading && <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-400" size={28} /></div>}
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">

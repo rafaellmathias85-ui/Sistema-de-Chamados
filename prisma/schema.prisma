@@ -1529,6 +1529,7 @@ model UsbPolicy {
   vendorId      String?
   productId     String?
   serialNumber  String?
+  machineIds    String[]  @default([]) // IDs das máquinas específicas (vazio = todas)
   priority      Int       @default(100) // Menor = maior prioridade
   isActive      Boolean   @default(true)
   createdById   String?

@@ -198,8 +198,6 @@ export default function DiskHealthPage() {
   };
   const activeAlerts = alerts.filter(a => a.status === 'active').length;
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-400" size={28} /></div>;
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -255,6 +253,8 @@ export default function DiskHealthPage() {
 
       {/* Machine Filter */}
       <MachineFilter value={filterMachine} onChange={setFilterMachine} />
+
+      {loading && <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-400" size={28} /></div>}
 
       {/* Tabs */}
       <div className="flex gap-1 tm-bg-card border tm-border rounded-lg p-1 w-fit">

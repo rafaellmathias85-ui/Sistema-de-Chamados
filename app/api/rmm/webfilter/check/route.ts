@@ -18,6 +18,23 @@ export async function GET(request: NextRequest) {
     const company = await prisma.company.findUnique({ where: { rmmToken: token } });
     if (!company) return NextResponse.json({ error: 'Token inválido' }, { status: 401 });
 
+    // Resolver machineId: agente pode enviar hostname ou machineId
+    const machineIdParam = searchParams.get('machineId') || searchParams.get('hostname') || '';
+    let machineRecord: { id: string } | null = null;
+    if (machineIdParam) {
+      // Tentar buscar por id (cuid) ou por hostname
+      machineRecord = await prisma.rmmMachine.findFirst({
+        where: {
+          companyId: company.id,
+          OR: [
+            { id: machineIdParam },
+            { hostname: machineIdParam },
+          ],
+        },
+        select: { id: true },
+      });
+    }
+
     // Extrair domínio da URL
     let domain: string;
     try {
@@ -27,7 +44,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Buscar políticas aplicáveis (globais + empresa)
-    const policies = await prisma.webFilterPolicy.findMany({
+    const allPolicies = await prisma.webFilterPolicy.findMany({
       where: {
         isActive: true,
         OR: [
@@ -37,6 +54,11 @@ export async function GET(request: NextRequest) {
       },
       orderBy: { priority: 'asc' },
     });
+
+    // Filtrar por machineIds: vazio = todas, com IDs = apenas máquinas listadas
+    const policies = machineRecord
+      ? allPolicies.filter(p => !p.machineIds || p.machineIds.length === 0 || p.machineIds.includes(machineRecord!.id))
+      : allPolicies;
 
     for (const policy of policies) {
       // 1. Verificar whitelist (domínios liberados)

@@ -31,7 +31,8 @@ export async function GET(
     }
 
     // Buscar políticas USB (globais + da empresa), ordenadas por prioridade
-    const usbPolicies = await prisma.usbPolicy.findMany({
+    // Filtrar por machineIds: vazio = todas, com IDs = apenas máquinas listadas
+    const allUsbPolicies = await prisma.usbPolicy.findMany({
       where: {
         isActive: true,
         OR: [
@@ -41,6 +42,9 @@ export async function GET(
       },
       orderBy: { priority: 'asc' },
     });
+    const usbPolicies = allUsbPolicies.filter(p =>
+      !p.machineIds || p.machineIds.length === 0 || p.machineIds.includes(machine.id)
+    );
 
     // Buscar políticas de produtividade
     const productivityPolicies = await prisma.productivityPolicy.findMany({
@@ -54,7 +58,8 @@ export async function GET(
     });
 
     // Buscar políticas de web filter
-    const webFilterPolicies = await prisma.webFilterPolicy.findMany({
+    // Filtrar por machineIds: vazio = todas, com IDs = apenas máquinas listadas
+    const allWebFilterPolicies = await prisma.webFilterPolicy.findMany({
       where: {
         isActive: true,
         OR: [
@@ -64,6 +69,9 @@ export async function GET(
       },
       orderBy: { priority: 'asc' },
     });
+    const webFilterPolicies = allWebFilterPolicies.filter(p =>
+      !p.machineIds || p.machineIds.length === 0 || p.machineIds.includes(machine.id)
+    );
 
     // Buscar categorias de web filter com domínios
     const webFilterCategories = await prisma.webFilterCategory.findMany({

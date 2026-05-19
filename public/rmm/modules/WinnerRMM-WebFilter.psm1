@@ -554,5 +554,177 @@ function Send-WebFilterLogs {
     }
 }
 
+# ============ ENFORCEMENT VIA HOSTS FILE ============
+
+function Enforce-WebFilterPolicies {
+    <#
+    .SYNOPSIS
+        Aplica bloqueio REAL de dominios no Windows hosts file.
+        Busca politicas do servidor e adiciona/remove entradas no hosts.
+        Requer execucao como SYSTEM/Admin.
+    .PARAMETER ApiUrl
+        URL base da API (ex: https://www.wticorp.com.br)
+    .PARAMETER Token
+        Token RMM da empresa
+    .PARAMETER MachineId
+        ID da maquina no sistema
+    #>
+    param(
+        [string]$ApiUrl,
+        [string]$Token,
+        [string]$MachineId
+    )
+
+    $hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
+    $markerStart = "# === WINNER-WEBFILTER-START ==="
+    $markerEnd   = "# === WINNER-WEBFILTER-END ==="
+
+    try {
+        # 1. Buscar politicas aplicaveis para esta maquina
+        $policiesUrl = "$ApiUrl/api/rmm/governance/policies/for-machine/$($MachineId)?token=$Token"
+        $response = Invoke-RestMethod -Uri $policiesUrl -Method GET -TimeoutSec 10 -ErrorAction Stop
+
+        $webFilter = $response.webFilter
+        if (-not $webFilter -or -not $webFilter.policies) {
+            Write-Log "[WebFilter-Enforce] No web filter policies found for machine $MachineId"
+            # Limpar bloqueios existentes se nao ha mais politicas
+            Remove-WebFilterHostsEntries -HostsPath $hostsPath -MarkerStart $markerStart -MarkerEnd $markerEnd
+            return
+        }
+
+        # 2. Coletar todos os dominios que devem ser bloqueados
+        $blockedDomains = @{}
+        $categories = @{}
+        if ($webFilter.categories) {
+            foreach ($cat in $webFilter.categories) {
+                $categories[$cat.id] = $cat
+            }
+        }
+
+        foreach ($policy in $webFilter.policies) {
+            if ($policy.logOnly) { continue }  # Politica de log nao bloqueia
+
+            # Dominios bloqueados diretamente
+            if ($policy.blockedDomains) {
+                foreach ($d in $policy.blockedDomains) {
+                    $d = $d.Trim().ToLower()
+                    if ($d.Length -gt 0) {
+                        $blockedDomains[$d] = $policy.name
+                        # Adicionar com e sem www
+                        if (-not $d.StartsWith("www.")) {
+                            $blockedDomains["www.$d"] = $policy.name
+                        }
+                    }
+                }
+            }
+
+            # Dominios das categorias bloqueadas
+            if ($policy.blockedCategories -and $policy.blockedCategories.Count -gt 0) {
+                foreach ($catId in $policy.blockedCategories) {
+                    if ($categories.ContainsKey($catId)) {
+                        $cat = $categories[$catId]
+                        if ($cat.domains) {
+                            foreach ($domObj in $cat.domains) {
+                                $domain = $domObj.domain.Trim().ToLower()
+                                if ($domain.Length -gt 0 -and -not $domObj.isRegex) {
+                                    $blockedDomains[$domain] = "$($policy.name) [$($cat.name)]"
+                                    if (-not $domain.StartsWith("www.")) {
+                                        $blockedDomains["www.$domain"] = "$($policy.name) [$($cat.name)]"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            # Remover dominios da whitelist (allowedDomains)
+            if ($policy.allowedDomains) {
+                foreach ($d in $policy.allowedDomains) {
+                    $d = $d.Trim().ToLower()
+                    $blockedDomains.Remove($d)
+                    $blockedDomains.Remove("www.$d")
+                }
+            }
+        }
+
+        # 3. Reconstruir secao no hosts file
+        $currentHosts = @()
+        if (Test-Path $hostsPath) {
+            $currentHosts = Get-Content $hostsPath -Encoding UTF8 -ErrorAction SilentlyContinue
+        }
+
+        # Remover secao antiga
+        $newLines = @()
+        $inBlock = $false
+        foreach ($line in $currentHosts) {
+            if ($line.Trim() -eq $markerStart) { $inBlock = $true; continue }
+            if ($line.Trim() -eq $markerEnd) { $inBlock = $false; continue }
+            if (-not $inBlock) { $newLines += $line }
+        }
+
+        # Adicionar nova secao se houver dominios para bloquear
+        if ($blockedDomains.Count -gt 0) {
+            $newLines += ""
+            $newLines += $markerStart
+            $newLines += "# Gerenciado pelo Winner RMM - NAO EDITAR MANUALMENTE"
+            $newLines += "# Atualizado em: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+            $newLines += "# Dominios bloqueados: $($blockedDomains.Count)"
+
+            foreach ($entry in ($blockedDomains.GetEnumerator() | Sort-Object Key)) {
+                $newLines += "0.0.0.0 $($entry.Key)  # $($entry.Value)"
+            }
+
+            $newLines += $markerEnd
+        }
+
+        # 4. Escrever hosts file
+        $newContent = $newLines -join "`r`n"
+        [System.IO.File]::WriteAllText($hostsPath, $newContent, [System.Text.Encoding]::UTF8)
+
+        # 5. Flush DNS cache para aplicar imediatamente
+        try {
+            & ipconfig /flushdns 2>$null | Out-Null
+        } catch {}
+
+        $addedCount = $blockedDomains.Count
+        Write-Log "[WebFilter-Enforce] Hosts file updated: $addedCount domains blocked"
+
+    } catch {
+        Write-Log "[WebFilter-Enforce] Error: $($_.Exception.Message)"
+    }
+}
+
+function Remove-WebFilterHostsEntries {
+    <#
+    .SYNOPSIS
+        Remove todas as entradas do Winner WebFilter do hosts file.
+    #>
+    param(
+        [string]$HostsPath,
+        [string]$MarkerStart,
+        [string]$MarkerEnd
+    )
+
+    if (-not (Test-Path $HostsPath)) { return }
+
+    $lines = Get-Content $HostsPath -Encoding UTF8 -ErrorAction SilentlyContinue
+    $newLines = @()
+    $inBlock = $false
+    $changed = $false
+
+    foreach ($line in $lines) {
+        if ($line.Trim() -eq $MarkerStart) { $inBlock = $true; $changed = $true; continue }
+        if ($line.Trim() -eq $MarkerEnd) { $inBlock = $false; continue }
+        if (-not $inBlock) { $newLines += $line }
+    }
+
+    if ($changed) {
+        [System.IO.File]::WriteAllText($HostsPath, ($newLines -join "`r`n"), [System.Text.Encoding]::UTF8)
+        Write-Log "[WebFilter-Enforce] Cleaned hosts file (removed Winner WebFilter entries)"
+        try { & ipconfig /flushdns 2>$null | Out-Null } catch {}
+    }
+}
+
 # ============ EXPORTAR ============
-Export-ModuleMember -Function Get-BrowserHistory, Test-UrlAllowed, Send-WebActivity, Send-WebFilterLogs
+Export-ModuleMember -Function Get-BrowserHistory, Test-UrlAllowed, Send-WebActivity, Send-WebFilterLogs, Enforce-WebFilterPolicies

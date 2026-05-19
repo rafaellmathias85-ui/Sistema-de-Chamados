@@ -41,25 +41,30 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, companyId, policyType, deviceClass, vendorId, productId, serialNumber, priority } = body;
+    const { name, companyId, policyType, deviceClass, vendorId, productId, serialNumber, priority, machineIds } = body;
 
-    if (!name || !policyType) {
-      return NextResponse.json({ error: 'name e policyType obrigatórios' }, { status: 400 });
+    // Compatibilidade: frontend envia action em vez de policyType
+    const resolvedPolicyType = policyType || body.action;
+
+    if (!name || !resolvedPolicyType) {
+      return NextResponse.json({ error: 'name e policyType/action obrigatórios' }, { status: 400 });
     }
 
-    if (!['allow', 'block', 'read_only', 'notify'].includes(policyType)) {
-      return NextResponse.json({ error: 'policyType inválido' }, { status: 400 });
+    const validTypes = ['allow', 'block', 'read_only', 'notify', 'log_only'];
+    if (!validTypes.includes(resolvedPolicyType)) {
+      return NextResponse.json({ error: `policyType inválido: ${resolvedPolicyType}` }, { status: 400 });
     }
 
     const policy = await prisma.usbPolicy.create({
       data: {
         name,
         companyId: companyId || null,
-        policyType,
-        deviceClass: deviceClass || null,
+        policyType: resolvedPolicyType,
+        deviceClass: deviceClass || body.deviceType || null,
         vendorId: vendorId || null,
         productId: productId || null,
         serialNumber: serialNumber || null,
+        machineIds: Array.isArray(machineIds) ? machineIds : [],
         priority: priority || 100,
         createdById: session.user.id,
         tenantId: session.user.tenantId || null,
@@ -96,6 +101,8 @@ export async function PATCH(request: NextRequest) {
     if (updateFields.deviceClass !== undefined) data.deviceClass = updateFields.deviceClass;
     if (updateFields.priority !== undefined) data.priority = updateFields.priority;
     if (updateFields.isActive !== undefined) data.isActive = updateFields.isActive;
+    if (updateFields.machineIds !== undefined) data.machineIds = updateFields.machineIds;
+    if (updateFields.companyId !== undefined) data.companyId = updateFields.companyId || null;
 
     const updated = await prisma.usbPolicy.update({ where: { id }, data });
 

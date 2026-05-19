@@ -199,6 +199,9 @@ while ($true) {
             if (Get-Command Enforce-ProductivityPolicies -ErrorAction SilentlyContinue) {
                 Enforce-ProductivityPolicies -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
             }
+            if (Get-Command Enforce-WebFilterPolicies -ErrorAction SilentlyContinue) {
+                Enforce-WebFilterPolicies -ApiUrl $API_URL -Token $COMPANY_TOKEN -MachineId $machineId
+            }
             
             $lastGovernanceRun = Get-Date
         }
