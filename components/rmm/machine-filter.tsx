@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { Monitor, Building2, Search } from 'lucide-react';
+import { Monitor, Building2, Search, Wifi } from 'lucide-react';
 
 interface MachineOption {
   id: string;
   hostname: string;
   ipAddress?: string | null;
+  agentVersion?: string | null;
+  status?: string | null;
   company: { id: string; name: string };
 }
 
@@ -63,13 +65,15 @@ export default function MachineFilter({ value, onChange, className }: MachineFil
 
   const handleCompanyChange = (companyId: string) => {
     setSelectedCompany(companyId);
-    // Reset máquina selecionada quando muda empresa
     onChange('');
   };
 
   const handleMachineChange = (machineId: string) => {
     onChange(machineId);
   };
+
+  // Helper: monitorado = tem agentVersion v2
+  const isMonitored = (m: MachineOption) => !!m.agentVersion && m.agentVersion.startsWith('2');
 
   return (
     <div className={`space-y-2 ${className || ''}`}>
@@ -89,7 +93,7 @@ export default function MachineFilter({ value, onChange, className }: MachineFil
           </select>
         </div>
 
-        {/* Filtro por máquina */}
+        {/* Filtro por máquina — agora com indicador de monitoramento */}
         <div className="flex items-center gap-2 flex-1">
           <Monitor size={16} className="tm-text-muted flex-shrink-0" />
           <select
@@ -100,7 +104,9 @@ export default function MachineFilter({ value, onChange, className }: MachineFil
             <option value="">Selecione uma máquina ({filteredMachines.length})</option>
             {filteredMachines.map(m => (
               <option key={m.id} value={m.id}>
-                {m.hostname}{m.ipAddress ? ` (${m.ipAddress})` : ''}{!selectedCompany && m.company?.name ? ` — ${m.company.name}` : ''}
+                {isMonitored(m) ? '🟢 ' : '⚪ '}
+                {m.hostname}{m.ipAddress ? ` (${m.ipAddress})` : ''}
+                {!selectedCompany && m.company?.name ? ` — ${m.company.name}` : ''}
               </option>
             ))}
           </select>
@@ -116,7 +122,6 @@ export default function MachineFilter({ value, onChange, className }: MachineFil
           value={searchTerm}
           onChange={e => {
             setSearchTerm(e.target.value);
-            // Se digitar busca, resetar seleções
             if (e.target.value.trim()) onChange('');
           }}
           className="w-full pl-9 pr-4 py-2 tm-bg-card border tm-border rounded-lg tm-text text-xs"

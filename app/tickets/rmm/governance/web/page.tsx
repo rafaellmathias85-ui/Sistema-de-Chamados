@@ -2,11 +2,12 @@
 
 import { useSession } from 'next-auth/react';
 import { useEffect, useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import {
-  Globe, ChevronLeft, RefreshCw, Search, Loader2,
-  Shield, Plus, Trash2, Check, X, AlertTriangle, Tag, Link2,
+  Globe, ChevronLeft, Search, Loader2,
+  Shield, Plus, Trash2, Check, X, Tag, Edit2,
+  Building2, ToggleLeft, ToggleRight,
 } from 'lucide-react';
 import MachineFilter from '@/components/rmm/machine-filter';
 
@@ -39,18 +40,32 @@ interface BrowsingEntry {
 interface WfPolicy {
   id: string;
   name: string;
-  action: string;
+  mode: string;
   isActive: boolean;
-  appliesToAll: boolean;
-  categories: { id: string; category: { name: string } }[];
+  companyId: string | null;
+  company?: { id: string; name: string } | null;
+  blockedDomains: string[];
+  allowedDomains: string[];
+  blockedCategories: string[];
+  blockedKeywords: string[];
+  logOnly: boolean;
+  safeSearch: boolean;
+  priority: number;
 }
 
 interface WfCategory {
   id: string;
   name: string;
+  slug: string;
   description: string | null;
+  isSystem: boolean;
   _count?: { domains: number };
   domains?: { id: string; domain: string }[];
+}
+
+interface CompanyOption {
+  id: string;
+  name: string;
 }
 
 export default function WebPage() {
@@ -60,16 +75,40 @@ export default function WebPage() {
   const [browsing, setBrowsing] = useState<BrowsingEntry[]>([]);
   const [policies, setPolicies] = useState<WfPolicy[]>([]);
   const [categories, setCategories] = useState<WfCategory[]>([]);
+  const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [catForm, setCatForm] = useState({ name: '', description: '' });
-  const [polForm, setPolForm] = useState({ name: '', action: 'block', categoryIds: [] as string[], appliesToAll: true });
-  const [domainInput, setDomainInput] = useState('');
-  const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [formType, setFormType] = useState<'policy' | 'category'>('policy');
   const [filterMachine, setFilterMachine] = useState('');
+  const [domainInputs, setDomainInputs] = useState<Record<string, string>>({});
+  const [selectedCat, setSelectedCat] = useState<string | null>(null);
+
+  // Form: nova política
+  const [polForm, setPolForm] = useState({
+    name: '',
+    companyId: '' as string,
+    mode: 'blacklist',
+    blockedDomains: '' as string,
+    blockedCategories: [] as string[],
+    blockedKeywords: '' as string,
+    logOnly: false,
+    safeSearch: true,
+  });
+
+  // Form: nova categoria
+  const [catForm, setCatForm] = useState({ name: '', slug: '', description: '' });
+  const [formType, setFormType] = useState<'policy' | 'category'>('policy');
+
+  // Carregar empresas
+  useEffect(() => {
+    fetch('/api/companies')
+      .then(r => r.json())
+      .then(data => {
+        const list = Array.isArray(data) ? data : [];
+        setCompanies(list.map((c: any) => ({ id: c.id, name: c.name })).sort((a: CompanyOption, b: CompanyOption) => a.name.localeCompare(b.name)));
+      }).catch(() => {});
+  }, []);
 
   const loadBrowsing = useCallback(async () => {
     if (!filterMachine) { setBrowsing([]); return; }
@@ -84,10 +123,12 @@ export default function WebPage() {
     const res = await fetch(`/api/rmm/webfilter/logs?${params}`);
     if (res.ok) setLogs(await res.json());
   }, [filterMachine]);
+
   const loadPolicies = useCallback(async () => {
     const res = await fetch('/api/rmm/webfilter/policies');
     if (res.ok) setPolicies(await res.json());
   }, []);
+
   const loadCategories = useCallback(async () => {
     const res = await fetch('/api/rmm/webfilter/categories');
     if (res.ok) setCategories(await res.json());
@@ -98,43 +139,84 @@ export default function WebPage() {
     Promise.all([loadBrowsing(), loadLogs(), loadPolicies(), loadCategories()]).finally(() => setLoading(false));
   }, [session, loadBrowsing, loadLogs, loadPolicies, loadCategories]);
 
+  // ===== POLÍTICAS =====
   const handleCreatePolicy = async () => {
+    if (!polForm.name) return;
     setSaving(true);
     try {
+      const payload: any = {
+        name: polForm.name,
+        mode: polForm.mode,
+        blockedDomains: polForm.blockedDomains ? polForm.blockedDomains.split(',').map(d => d.trim()).filter(Boolean) : [],
+        blockedCategories: polForm.blockedCategories,
+        blockedKeywords: polForm.blockedKeywords ? polForm.blockedKeywords.split(',').map(k => k.trim()).filter(Boolean) : [],
+        logOnly: polForm.logOnly,
+        safeSearch: polForm.safeSearch,
+      };
+      if (polForm.companyId) payload.companyId = polForm.companyId;
       const res = await fetch('/api/rmm/webfilter/policies', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(polForm),
+        body: JSON.stringify(payload),
       });
-      if (res.ok) { await loadPolicies(); setShowForm(false); }
+      if (res.ok) {
+        await loadPolicies();
+        setShowForm(false);
+        setPolForm({ name: '', companyId: '', mode: 'blacklist', blockedDomains: '', blockedCategories: [], blockedKeywords: '', logOnly: false, safeSearch: true });
+      }
     } finally { setSaving(false); }
   };
 
+  const handleDeletePolicy = async (id: string) => {
+    if (!confirm('Tem certeza que deseja excluir esta política?')) return;
+    const res = await fetch(`/api/rmm/webfilter/policies/${id}`, { method: 'DELETE' });
+    if (res.ok) await loadPolicies();
+  };
+
+  const handleTogglePolicy = async (id: string, isActive: boolean) => {
+    const res = await fetch(`/api/rmm/webfilter/policies/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive: !isActive }),
+    });
+    if (res.ok) await loadPolicies();
+  };
+
+  // ===== CATEGORIAS =====
   const handleCreateCategory = async () => {
+    if (!catForm.name) return;
     setSaving(true);
     try {
+      const slug = catForm.slug || catForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
       const res = await fetch('/api/rmm/webfilter/categories', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(catForm),
+        body: JSON.stringify({ name: catForm.name, slug, description: catForm.description || null }),
       });
-      if (res.ok) { await loadCategories(); setShowForm(false); setCatForm({ name: '', description: '' }); }
+      if (res.ok) {
+        await loadCategories();
+        setShowForm(false);
+        setCatForm({ name: '', slug: '', description: '' });
+      }
     } finally { setSaving(false); }
   };
 
   const handleAddDomain = async (categoryId: string) => {
-    if (!domainInput.trim()) return;
-    await fetch(`/api/rmm/webfilter/categories/${categoryId}/domains`, {
+    const input = domainInputs[categoryId]?.trim();
+    if (!input) return;
+    const res = await fetch(`/api/rmm/webfilter/categories/${categoryId}/domains`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain: domainInput.trim() }),
+      body: JSON.stringify({ domains: [input] }),
     });
-    setDomainInput('');
+    if (res.ok) {
+      setDomainInputs(prev => ({ ...prev, [categoryId]: '' }));
+      await loadCategories();
+    }
+  };
+
+  const handleRemoveDomain = async (categoryId: string, domainText: string) => {
+    await fetch(`/api/rmm/webfilter/categories/${categoryId}/domains?domain=${encodeURIComponent(domainText)}`, { method: 'DELETE' });
     await loadCategories();
   };
 
-  const handleRemoveDomain = async (categoryId: string, domainId: string) => {
-    await fetch(`/api/rmm/webfilter/categories/${categoryId}/domains?domainId=${domainId}`, { method: 'DELETE' });
-    await loadCategories();
-  };
-
+  // ===== FILTROS =====
   const filteredLogs = logs.filter(l =>
     !search ||
     l.url.toLowerCase().includes(search.toLowerCase()) ||
@@ -175,7 +257,7 @@ export default function WebPage() {
       {/* Machine Filter */}
       <MachineFilter value={filterMachine} onChange={setFilterMachine} />
 
-      {/* Browsing Tab — Páginas visitadas com navegador */}
+      {/* ========== BROWSING TAB ========== */}
       {tab === 'browsing' && (
         <>
           <div className="relative">
@@ -246,7 +328,7 @@ export default function WebPage() {
         </>
       )}
 
-      {/* Logs Tab */}
+      {/* ========== LOGS TAB ========== */}
       {tab === 'logs' && (
         <>
           <div className="relative">
@@ -257,7 +339,7 @@ export default function WebPage() {
           {filteredLogs.length === 0 ? (
             <div className="text-center py-20 tm-text-secondary">
               <Globe className="mx-auto mb-3 opacity-30" size={48} />
-              <p>Nenhum log de navegação registrado</p>
+              <p>Nenhum log de bloqueio registrado</p>
             </div>
           ) : (
             <div className="tm-bg-card border tm-border rounded-xl overflow-hidden">
@@ -289,7 +371,7 @@ export default function WebPage() {
                         <td className="px-4 py-3 text-xs">
                           {l.categoryMatched ? <span className="text-orange-400">{l.categoryMatched}</span> : <span className="tm-text-muted">—</span>}
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs tm-text">{l.machine.hostname}</td>
+                        <td className="px-4 py-3 font-mono text-xs tm-text">{l.machine?.hostname || '—'}</td>
                         <td className="px-4 py-3 tm-text-muted text-xs">{new Date(l.timestamp).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
                       </motion.tr>
                     ))}
@@ -301,7 +383,7 @@ export default function WebPage() {
         </>
       )}
 
-      {/* Policies Tab */}
+      {/* ========== POLICIES TAB ========== */}
       {tab === 'policies' && (
         <>
           <div className="flex justify-end">
@@ -309,61 +391,130 @@ export default function WebPage() {
               <Plus size={14} /> Nova Política
             </button>
           </div>
-          {showForm && formType === 'policy' && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="tm-bg-card border tm-border rounded-xl p-5 space-y-4">
-              <h3 className="font-semibold tm-text">Nova Política Web Filter</h3>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs tm-text-secondary">Nome</label>
-                  <input value={polForm.name} onChange={e => setPolForm(p => ({ ...p, name: e.target.value }))}
-                    className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1" placeholder="Ex: Bloquear Redes Sociais" />
-                </div>
-                <div>
-                  <label className="text-xs tm-text-secondary">Ação</label>
-                  <select value={polForm.action} onChange={e => setPolForm(p => ({ ...p, action: e.target.value }))}
-                    className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1">
-                    <option value="block">Bloquear</option>
-                    <option value="allow">Permitir</option>
-                    <option value="log_only">Apenas Registrar</option>
-                  </select>
-                </div>
-              </div>
-              {categories.length > 0 && (
-                <div>
-                  <label className="text-xs tm-text-secondary">Categorias</label>
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {categories.map(c => (
-                      <button key={c.id} onClick={() => setPolForm(p => ({ ...p, categoryIds: p.categoryIds.includes(c.id) ? p.categoryIds.filter(x => x !== c.id) : [...p.categoryIds, c.id] }))}
-                        className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                          polForm.categoryIds.includes(c.id) ? 'bg-blue-600 border-blue-500 text-white' : 'tm-border tm-text hover:bg-white/10'
-                        }`}>{c.name}</button>
-                    ))}
+
+          <AnimatePresence>
+            {showForm && formType === 'policy' && (
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                className="tm-bg-card border tm-border rounded-xl p-5 space-y-4">
+                <h3 className="font-semibold tm-text">Nova Política Web Filter</h3>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs tm-text-secondary">Nome da Política *</label>
+                    <input value={polForm.name} onChange={e => setPolForm(p => ({ ...p, name: e.target.value }))}
+                      className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1"
+                      placeholder="Ex: Bloquear Redes Sociais" />
+                  </div>
+                  <div>
+                    <label className="text-xs tm-text-secondary">Empresa (deixe vazio = global)</label>
+                    <select value={polForm.companyId} onChange={e => setPolForm(p => ({ ...p, companyId: e.target.value }))}
+                      className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1">
+                      <option value="">Todas as empresas (Global)</option>
+                      {companies.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-              )}
-              <div className="flex gap-2">
-                <button onClick={handleCreatePolicy} disabled={saving || !polForm.name} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm disabled:opacity-50">
-                  {saving ? 'Salvando...' : 'Criar Política'}
-                </button>
-                <button onClick={() => setShowForm(false)} className="px-4 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">Cancelar</button>
-              </div>
-            </motion.div>
-          )}
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs tm-text-secondary">Modo</label>
+                    <select value={polForm.mode} onChange={e => setPolForm(p => ({ ...p, mode: e.target.value }))}
+                      className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1">
+                      <option value="blacklist">Blacklist (bloquear listados)</option>
+                      <option value="whitelist">Whitelist (só permitir listados)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs tm-text-secondary">Domínios bloqueados (separados por vírgula)</label>
+                    <input value={polForm.blockedDomains} onChange={e => setPolForm(p => ({ ...p, blockedDomains: e.target.value }))}
+                      className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1"
+                      placeholder="facebook.com, tiktok.com, instagram.com" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs tm-text-secondary">Palavras-chave bloqueadas (separadas por vírgula)</label>
+                  <input value={polForm.blockedKeywords} onChange={e => setPolForm(p => ({ ...p, blockedKeywords: e.target.value }))}
+                    className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1"
+                    placeholder="poker, casino, torrent" />
+                </div>
+
+                {categories.length > 0 && (
+                  <div>
+                    <label className="text-xs tm-text-secondary">Categorias bloqueadas</label>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {categories.map(c => (
+                        <button key={c.id} onClick={() => setPolForm(p => ({
+                          ...p, blockedCategories: p.blockedCategories.includes(c.id)
+                            ? p.blockedCategories.filter(x => x !== c.id)
+                            : [...p.blockedCategories, c.id]
+                        }))}
+                          className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                            polForm.blockedCategories.includes(c.id) ? 'bg-red-600 border-red-500 text-white' : 'tm-border tm-text hover:bg-white/10'
+                          }`}>{c.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 text-sm tm-text cursor-pointer">
+                    <input type="checkbox" checked={polForm.logOnly} onChange={e => setPolForm(p => ({ ...p, logOnly: e.target.checked }))} />
+                    Apenas registrar (não bloquear)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm tm-text cursor-pointer">
+                    <input type="checkbox" checked={polForm.safeSearch} onChange={e => setPolForm(p => ({ ...p, safeSearch: e.target.checked }))} />
+                    Forçar SafeSearch
+                  </label>
+                </div>
+
+                <div className="flex gap-2">
+                  <button onClick={handleCreatePolicy} disabled={saving || !polForm.name}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm disabled:opacity-50">
+                    {saving ? 'Salvando...' : 'Criar Política'}
+                  </button>
+                  <button onClick={() => setShowForm(false)} className="px-4 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">Cancelar</button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {policies.length === 0 ? (
-            <div className="text-center py-20 tm-text-secondary"><Shield className="mx-auto mb-3 opacity-30" size={48} /><p>Nenhuma política web configurada</p></div>
+            <div className="text-center py-20 tm-text-secondary">
+              <Shield className="mx-auto mb-3 opacity-30" size={48} />
+              <p>Nenhuma política web configurada</p>
+            </div>
           ) : (
             <div className="space-y-3">
               {policies.map(p => (
                 <div key={p.id} className={`tm-bg-card border rounded-xl p-4 ${p.isActive ? 'border-green-500/30' : 'tm-border opacity-60'}`}>
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1">
                       <h4 className="font-medium tm-text">{p.name}</h4>
-                      <p className="text-xs tm-text-secondary mt-0.5">
-                        Ação: <span className={p.action === 'block' ? 'text-red-400' : 'text-green-400'}>{p.action}</span>
-                        {p.categories?.length > 0 && ` | Categorias: ${p.categories.map(c => c.category.name).join(', ')}`}
-                      </p>
+                      <div className="text-xs tm-text-secondary mt-0.5 flex flex-wrap gap-x-3 gap-y-1">
+                        <span>Modo: <span className="text-blue-400">{p.mode}</span></span>
+                        {p.company ? (
+                          <span className="flex items-center gap-1"><Building2 size={10} /> {p.company.name}</span>
+                        ) : (
+                          <span className="text-yellow-400">Global</span>
+                        )}
+                        {p.blockedDomains?.length > 0 && <span>{p.blockedDomains.length} domínio(s)</span>}
+                        {p.blockedCategories?.length > 0 && <span>{p.blockedCategories.length} categoria(s)</span>}
+                        {p.logOnly && <span className="text-yellow-400">Apenas log</span>}
+                      </div>
                     </div>
-                    <span className={`text-xs ${p.isActive ? 'text-green-400' : 'tm-text-muted'}`}>{p.isActive ? 'Ativa' : 'Inativa'}</span>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleTogglePolicy(p.id, p.isActive)}
+                        className={`p-1.5 rounded transition-colors ${p.isActive ? 'text-green-400 hover:bg-green-500/10' : 'tm-text-muted hover:bg-white/10'}`}
+                        title={p.isActive ? 'Desativar' : 'Ativar'}>
+                        {p.isActive ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
+                      </button>
+                      <button onClick={() => handleDeletePolicy(p.id)}
+                        className="p-1.5 rounded text-red-400 hover:bg-red-500/10 transition-colors" title="Excluir">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -372,7 +523,7 @@ export default function WebPage() {
         </>
       )}
 
-      {/* Categories Tab */}
+      {/* ========== CATEGORIES TAB ========== */}
       {tab === 'categories' && (
         <>
           <div className="flex justify-end">
@@ -380,61 +531,91 @@ export default function WebPage() {
               <Plus size={14} /> Nova Categoria
             </button>
           </div>
-          {showForm && formType === 'category' && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="tm-bg-card border tm-border rounded-xl p-5 space-y-4">
-              <h3 className="font-semibold tm-text">Nova Categoria</h3>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs tm-text-secondary">Nome</label>
-                  <input value={catForm.name} onChange={e => setCatForm(p => ({ ...p, name: e.target.value }))}
-                    className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1" placeholder="Ex: Redes Sociais" />
+
+          <AnimatePresence>
+            {showForm && formType === 'category' && (
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                className="tm-bg-card border tm-border rounded-xl p-5 space-y-4">
+                <h3 className="font-semibold tm-text">Nova Categoria</h3>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs tm-text-secondary">Nome *</label>
+                    <input value={catForm.name} onChange={e => setCatForm(p => ({ ...p, name: e.target.value }))}
+                      className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1"
+                      placeholder="Ex: Redes Sociais" />
+                  </div>
+                  <div>
+                    <label className="text-xs tm-text-secondary">Descrição</label>
+                    <input value={catForm.description} onChange={e => setCatForm(p => ({ ...p, description: e.target.value }))}
+                      className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1"
+                      placeholder="Conteúdo adulto e pornografia" />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs tm-text-secondary">Descrição</label>
-                  <input value={catForm.description} onChange={e => setCatForm(p => ({ ...p, description: e.target.value }))}
-                    className="w-full px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm mt-1" placeholder="Ex: Facebook, Instagram, TikTok..." />
+                <div className="flex gap-2">
+                  <button onClick={handleCreateCategory} disabled={saving || !catForm.name}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm disabled:opacity-50">
+                    {saving ? 'Salvando...' : 'Criar Categoria'}
+                  </button>
+                  <button onClick={() => setShowForm(false)} className="px-4 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">Cancelar</button>
                 </div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={handleCreateCategory} disabled={saving || !catForm.name} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm disabled:opacity-50">
-                  {saving ? 'Salvando...' : 'Criar Categoria'}
-                </button>
-                <button onClick={() => setShowForm(false)} className="px-4 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">Cancelar</button>
-              </div>
-            </motion.div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {categories.length === 0 ? (
-            <div className="text-center py-20 tm-text-secondary"><Tag className="mx-auto mb-3 opacity-30" size={48} /><p>Nenhuma categoria criada</p></div>
+            <div className="text-center py-20 tm-text-secondary">
+              <Tag className="mx-auto mb-3 opacity-30" size={48} />
+              <p>Nenhuma categoria criada</p>
+            </div>
           ) : (
             <div className="space-y-3">
               {categories.map(cat => (
                 <div key={cat.id} className="tm-bg-card border tm-border rounded-xl p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <h4 className="font-medium tm-text flex items-center gap-2"><Tag size={14} className="text-blue-400" /> {cat.name}</h4>
+                      <h4 className="font-medium tm-text flex items-center gap-2">
+                        <Tag size={14} className="text-blue-400" /> {cat.name}
+                        {cat._count?.domains !== undefined && (
+                          <span className="text-xs tm-text-muted">({cat._count.domains} domínios)</span>
+                        )}
+                      </h4>
                       {cat.description && <p className="text-xs tm-text-secondary mt-0.5">{cat.description}</p>}
                     </div>
-                    <button onClick={() => setSelectedCat(selectedCat === cat.id ? null : cat.id)} className="text-xs tm-text-secondary hover:text-blue-400 transition-colors">
+                    <button onClick={() => setSelectedCat(selectedCat === cat.id ? null : cat.id)}
+                      className="text-xs tm-text-secondary hover:text-blue-400 transition-colors">
                       {selectedCat === cat.id ? 'Fechar' : 'Gerenciar domínios'}
                     </button>
                   </div>
-                  {selectedCat === cat.id && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-3 space-y-2 border-t tm-border pt-3">
-                      <div className="flex gap-2">
-                        <input value={domainInput} onChange={e => setDomainInput(e.target.value)} placeholder="dominio.com"
-                          className="flex-1 px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm" />
-                        <button onClick={() => handleAddDomain(cat.id)} className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm">Adicionar</button>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {cat.domains?.map(d => (
-                          <span key={d.id} className="px-2 py-1 tm-bg-card border tm-border rounded-full text-xs tm-text flex items-center gap-1">
-                            {d.domain}
-                            <button onClick={() => handleRemoveDomain(cat.id, d.id)} className="text-red-400 hover:text-red-300"><X size={10} /></button>
-                          </span>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
+                  <AnimatePresence>
+                    {selectedCat === cat.id && (
+                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                        className="mt-3 space-y-2 border-t tm-border pt-3 overflow-hidden">
+                        <div className="flex gap-2">
+                          <input
+                            value={domainInputs[cat.id] || ''}
+                            onChange={e => setDomainInputs(prev => ({ ...prev, [cat.id]: e.target.value }))}
+                            onKeyDown={e => { if (e.key === 'Enter') handleAddDomain(cat.id); }}
+                            placeholder="dominio.com"
+                            className="flex-1 px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm" />
+                          <button onClick={() => handleAddDomain(cat.id)}
+                            className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Adicionar</button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {cat.domains?.map(d => (
+                            <span key={d.id} className="px-2 py-1 tm-bg-card border tm-border rounded-full text-xs tm-text flex items-center gap-1">
+                              {d.domain}
+                              <button onClick={() => handleRemoveDomain(cat.id, d.domain)} className="text-red-400 hover:text-red-300 ml-1">
+                                <X size={10} />
+                              </button>
+                            </span>
+                          ))}
+                          {(!cat.domains || cat.domains.length === 0) && (
+                            <span className="text-xs tm-text-muted">Nenhum domínio adicionado</span>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               ))}
             </div>
