@@ -213,8 +213,8 @@ export default function AgentGeneratorPage() {
               <Shield size={28} className="text-accent-blue" />
             </div>
             <div className="text-left flex-1">
-              <span className="tm-text font-semibold text-lg block">⭐ Instalador Completo</span>
-              <span className="tm-text-secondary text-sm">PowerShell autossuficiente — instala o agente + registra como serviço SYSTEM</span>
+              <span className="tm-text font-semibold text-lg block">⭐ Instalador Completo (Agente V2)</span>
+              <span className="tm-text-secondary text-sm">PowerShell autossuficiente — instala o agente v2 modular + registra como serviço SYSTEM</span>
               <span className="text-accent-blue text-xs block mt-1">Instalar_RMM_Winner_*.ps1 · Recomendado para GPO / Intune</span>
             </div>
           </button>
@@ -227,8 +227,8 @@ export default function AgentGeneratorPage() {
               className="flex flex-col items-center gap-2 p-4 tm-bg-card border tm-border rounded-xl hover:bg-white/10 hover:border-accent-blue/30 transition disabled:opacity-50"
             >
               <Terminal size={24} className="text-cyan-400" />
-              <span className="tm-text font-medium text-sm">Agente PowerShell</span>
-              <span className="tm-text-muted text-xs">agente_rmm.ps1</span>
+              <span className="tm-text font-medium text-sm">Agente V2 PowerShell</span>
+              <span className="tm-text-muted text-xs">agente_rmm.ps1 (v2)</span>
             </button>
             <button
               onClick={() => handleDownload('agent_py')}
