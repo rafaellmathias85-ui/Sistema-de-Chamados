@@ -70,7 +70,7 @@ export async function PATCH(request: NextRequest) {
       // Criar ticket a partir do alerta
       const typeLabels: Record<string, string> = {
         cpu_high: 'CPU Alta', ram_high: 'RAM Alta', disk_high: 'Disco Alto',
-        offline: 'Offline', snmp_offline: 'Rede Offline', service_stopped: 'Serviço Parado',
+        offline: 'Offline', long_offline: 'Offline 30+ dias', snmp_offline: 'Rede Offline', service_stopped: 'Serviço Parado',
       };
       const typeLabel = typeLabels[alert.alertType] || alert.alertType;
       const severityLabel = alert.severity === 'critical' ? 'CRÍTICA' : alert.severity === 'warning' ? 'ALTA' : 'MÉDIA';

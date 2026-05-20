@@ -31,6 +31,8 @@ import {
   Power,
   Loader2,
   ArrowUpCircle,
+  Rocket,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface RmmMachine {
@@ -46,6 +48,7 @@ interface RmmMachine {
   lastCheckin: string | null;
   ipAddress: string | null;
   teamviewerId: string | null;
+  agentVersion: string | null;
   company: { id: string; name: string };
   _count: { tasks: number };
 }
@@ -71,8 +74,22 @@ export default function RmmDashboardPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [reactivating, setReactivating] = useState<string | null>(null);
   const [updatingAgent, setUpdatingAgent] = useState<string | null>(null);
+  const [migratingAgent, setMigratingAgent] = useState<string | null>(null);
+  const [migratingBulk, setMigratingBulk] = useState(false);
 
   const isAdmin = ['ADMIN','SUPPORT'].includes(session?.user?.role || '');
+
+  const isLegacyAgent = (m: RmmMachine) => {
+    if (!m.agentVersion) return true;
+    return !m.agentVersion.startsWith('3');
+  };
+
+  const getVersionBadge = (v: string | null) => {
+    if (!v) return { label: 'N/A', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
+    if (v.startsWith('3')) return { label: `V3`, color: 'bg-green-500/20 text-green-400 border-green-500/30' };
+    if (v.startsWith('2')) return { label: `V2`, color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' };
+    return { label: `V1`, color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
+  };
 
   const fetchData = async () => {
     try {
@@ -146,6 +163,59 @@ export default function RmmDashboardPage() {
       alert('Erro ao tentar reativar o agente.');
     } finally {
       setReactivating(null);
+    }
+  };
+
+  const handleMigrateV3 = async (machineId: string) => {
+    if (!confirm('Deseja migrar esta máquina para o Agente V3?\n\nO processo inclui:\n• Download do agente V3\n• Reconfiguração do serviço NSSM\n• Rollback automático em caso de falha')) return;
+    setMigratingAgent(machineId);
+    try {
+      const res = await fetch('/api/rmm/agent/migrate-v3', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machineIds: [machineId] }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`✅ Migração agendada para ${data.machines?.[0] || 'a máquina'}.\nSerá executada no próximo check-in.`);
+      } else {
+        alert(data.error || 'Erro ao agendar migração.');
+      }
+    } catch (e) {
+      console.error('Erro:', e);
+      alert('Erro ao agendar migração.');
+    } finally {
+      setMigratingAgent(null);
+    }
+  };
+
+  const handleBulkMigrateV3 = async (mode: 'all' | 'company') => {
+    const label = mode === 'all'
+      ? 'TODAS as máquinas V1/V2 online'
+      : `máquinas V1/V2 da empresa selecionada (${companies.find(c => c.id === filterCompany)?.name || filterCompany})`;
+    if (!confirm(`Deseja migrar ${label} para o Agente V3?\n\nIsso agendará a migração para cada máquina elegível.`)) return;
+    setMigratingBulk(true);
+    try {
+      const payload: any = mode === 'all'
+        ? { allLegacy: true }
+        : { companyId: filterCompany };
+      const res = await fetch('/api/rmm/agent/migrate-v3', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`✅ Migração agendada!\n\n• ${data.tasksCreated} tarefas criadas\n• ${data.skipped} já tinham migração pendente\n\nMáquinas: ${data.machines?.join(', ') || 'N/A'}`);
+        fetchData();
+      } else {
+        alert(data.error || 'Erro ao agendar migração em massa.');
+      }
+    } catch (e) {
+      console.error('Erro:', e);
+      alert('Erro ao agendar migração em massa.');
+    } finally {
+      setMigratingBulk(false);
     }
   };
 
@@ -331,6 +401,39 @@ export default function RmmDashboardPage() {
         </select>
       </div>
 
+      {/* Migração em massa V3 — só aparece se houver máquinas legacy */}
+      {isAdmin && machines.some(m => isLegacyAgent(m)) && (
+        <div className="flex flex-wrap items-center gap-3 p-3 tm-bg-card border border-orange-500/30 rounded-xl">
+          <div className="flex items-center gap-2 text-sm">
+            <Rocket size={16} className="text-orange-400" />
+            <span className="tm-text font-medium">Migração V3</span>
+            <span className="tm-text-secondary text-xs">
+              ({machines.filter(m => isLegacyAgent(m)).length} máquina(s) V1/V2)
+            </span>
+          </div>
+          <div className="flex gap-2 ml-auto">
+            {filterCompany && (
+              <button
+                onClick={() => handleBulkMigrateV3('company')}
+                disabled={migratingBulk}
+                className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition flex items-center gap-2 text-xs font-medium disabled:opacity-50"
+              >
+                {migratingBulk ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />}
+                Migrar empresa selecionada
+              </button>
+            )}
+            <button
+              onClick={() => handleBulkMigrateV3('all')}
+              disabled={migratingBulk}
+              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition flex items-center gap-2 text-xs font-medium disabled:opacity-50"
+            >
+              {migratingBulk ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />}
+              Migrar todas V1/V2
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Machine List */}
       <div className="tm-bg-card border tm-border rounded-xl overflow-hidden">
         {filtered.length === 0 ? (
@@ -352,6 +455,7 @@ export default function RmmDashboardPage() {
                   <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden xl:table-cell">IP</th>
                   <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden lg:table-cell">TeamViewer</th>
                   <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3">Empresa</th>
+                  <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden md:table-cell">Versão</th>
                   <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3 hidden md:table-cell">Último Check-in</th>
                   <th className="text-left text-xs font-medium tm-text-secondary uppercase px-4 py-3">Ações</th>
                 </tr>
@@ -408,6 +512,16 @@ export default function RmmDashboardPage() {
                       <span className="tm-text text-sm">{m.company.name}</span>
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell">
+                      {(() => {
+                        const badge = getVersionBadge(m.agentVersion);
+                        return (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${badge.color}`}>
+                            {badge.label}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
                       <span className="tm-text-secondary text-xs">{formatDate(m.lastCheckin)}</span>
                     </td>
                     <td className="px-4 py-3">
@@ -419,7 +533,17 @@ export default function RmmDashboardPage() {
                         >
                           <Terminal size={16} />
                         </Link>
-                        {m.status === 'Ligado' && isAdmin && (
+                        {m.status === 'Ligado' && isAdmin && isLegacyAgent(m) && (
+                          <button
+                            onClick={() => handleMigrateV3(m.id)}
+                            disabled={migratingAgent === m.id}
+                            className="p-1.5 text-orange-400 hover:text-orange-300 hover:tm-bg-card rounded-lg transition disabled:opacity-50"
+                            title="Migrar para Agente V3"
+                          >
+                            {migratingAgent === m.id ? <Loader2 size={16} className="animate-spin" /> : <Rocket size={16} />}
+                          </button>
+                        )}
+                        {m.status === 'Ligado' && isAdmin && !isLegacyAgent(m) && (
                           <button
                             onClick={() => handleForceUpdate(m.id)}
                             disabled={updatingAgent === m.id}

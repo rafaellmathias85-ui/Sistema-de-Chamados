@@ -83,10 +83,48 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ========= ALERTA AUTOMÁTICO: Máquinas offline há 30+ dias =========
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const longOfflineMachines = await prisma.rmmMachine.findMany({
+      where: {
+        lastCheckin: { lt: thirtyDaysAgo },
+      },
+      select: { id: true, hostname: true, companyId: true, lastCheckin: true },
+    });
+
+    let longOfflineAlerts = 0;
+    for (const machine of longOfflineMachines) {
+      // Dedup: verificar se já existe alerta long_offline pendente
+      const existing = await prisma.rmmAlert.findFirst({
+        where: {
+          machineId: machine.id,
+          alertType: 'long_offline',
+          acknowledged: false,
+          resolvedAt: null,
+        },
+      });
+      if (!existing) {
+        const daysOffline = Math.round((Date.now() - new Date(machine.lastCheckin!).getTime()) / (1000 * 60 * 60 * 24));
+        await prisma.rmmAlert.create({
+          data: {
+            machineId: machine.id,
+            alertType: 'long_offline',
+            message: `Máquina offline há ${daysOffline} dias — considere verificar ou remover`,
+            severity: 'critical',
+            thresholdValue: 30,
+            actualValue: daysOffline,
+          },
+        });
+        longOfflineAlerts++;
+      }
+    }
+
     return NextResponse.json({
       checked: machinesChecked,
-      alertsCreated,
-      message: `Verificação concluída: ${machinesChecked} máquinas verificadas, ${alertsCreated} alertas criados`,
+      alertsCreated: alertsCreated + longOfflineAlerts,
+      longOfflineDetected: longOfflineMachines.length,
+      longOfflineAlertsCreated: longOfflineAlerts,
+      message: `Verificação concluída: ${machinesChecked} máquinas verificadas, ${alertsCreated} alertas offline, ${longOfflineAlerts} alertas 30+ dias`,
     });
   } catch (error) {
     console.error('Erro ao verificar máquinas offline:', error);

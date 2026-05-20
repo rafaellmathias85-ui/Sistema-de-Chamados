@@ -95,6 +95,7 @@ export default function AlertsPage() {
     ram_high: 'RAM Alta',
     disk_high: 'Disco Alto',
     offline: 'Offline',
+    long_offline: 'Offline 30+ dias',
     snmp_offline: 'Rede Offline',
     service_stopped: 'Serviço Parado',
   };
