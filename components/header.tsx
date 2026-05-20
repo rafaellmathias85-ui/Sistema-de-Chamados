@@ -20,7 +20,7 @@ const navLinks: NavLink[] = [
     type: 'dropdown',
     items: [
       { name: 'Acesso Remoto', href: '/acesso-remoto', type: 'link' },
-      { name: 'WNR-Audit', href: 'https://wnrtecnologia.com.br/wnr-audit', type: 'external' },
+      { name: 'WNR-Audit', href: 'https://wnrtecnologia.com.br/wnraudit', type: 'external' },
     ],
   },
   { name: 'Contato', href: '#contato', type: 'anchor' },
