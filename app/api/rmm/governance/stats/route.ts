@@ -15,6 +15,7 @@ export async function GET() {
     const [
       endpointsMonitored,
       usbEvents,
+      usbMonitoredMachines,
       webMonitoredMachines,
       drivers,
       relayDiscovered,
@@ -25,6 +26,8 @@ export async function GET() {
       // Contar máquinas únicas com sessões de atividade (não total de sessões)
       prisma.endpointActivitySession.groupBy({ by: ['machineId'] }).then(g => g.length),
       prisma.usbEvent.count(),
+      // Contar máquinas distintas com eventos USB
+      prisma.usbEvent.groupBy({ by: ['machineId'] }).then(g => g.length),
       // Contar máquinas distintas com webActivity (não URLs individuais)
       prisma.webActivity.groupBy({ by: ['machineId'] }).then(g => g.length),
       prisma.driverInventory.count(),
@@ -37,6 +40,7 @@ export async function GET() {
     return NextResponse.json({
       endpointsMonitored,
       usbEvents,
+      usbMonitoredMachines,
       webActivities: webMonitoredMachines,
       drivers,
       relayDiscovered,

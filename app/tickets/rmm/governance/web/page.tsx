@@ -18,10 +18,13 @@ interface WebLog {
   title: string | null;
   action: string;
   categoryMatched: string | null;
+  reason: string | null;
+  matchedRule: string | null;
   machineId: string;
   username: string | null;
-  timestamp: string;
-  machine: { hostname: string; company: { name: string } };
+  eventAt: string;
+  machine: { hostname: string; company?: { name: string } };
+  category?: { name: string; slug: string } | null;
 }
 
 interface BrowsingEntry {
@@ -94,7 +97,8 @@ export default function WebPage() {
   const [loadingMachines, setLoadingMachines] = useState(false);
   const [allMachinesSelected, setAllMachinesSelected] = useState(true);
 
-  // Form: nova política
+  // Form: nova/editar política
+  const [editingPolicyId, setEditingPolicyId] = useState<string | null>(null);
   const [polForm, setPolForm] = useState({
     name: '',
     companyId: '' as string,
@@ -179,6 +183,32 @@ export default function WebPage() {
   // ===== POLÍTICAS =====
   const [formError, setFormError] = useState('');
 
+  const resetPolicyForm = () => {
+    setEditingPolicyId(null);
+    setPolForm({ name: '', companyId: '', mode: 'blacklist', blockedDomains: '', blockedCategories: [], blockedKeywords: '', machineIds: [], logOnly: false, safeSearch: true });
+    setAllMachinesSelected(true);
+    setCompanyMachines([]);
+    setFormError('');
+  };
+
+  const handleEditPolicy = (p: WfPolicy) => {
+    setEditingPolicyId(p.id);
+    setPolForm({
+      name: p.name,
+      companyId: p.companyId || '',
+      mode: p.mode,
+      blockedDomains: (p.blockedDomains || []).join(', '),
+      blockedCategories: p.blockedCategories || [],
+      blockedKeywords: (p.blockedKeywords || []).join(', '),
+      machineIds: p.machineIds || [],
+      logOnly: p.logOnly,
+      safeSearch: p.safeSearch,
+    });
+    setAllMachinesSelected(!p.machineIds || p.machineIds.length === 0);
+    setFormType('policy');
+    setShowForm(true);
+  };
+
   const handleCreatePolicy = async () => {
     if (!polForm.name) return;
     if (!allMachinesSelected && polForm.machineIds.length === 0 && polForm.companyId) {
@@ -199,20 +229,28 @@ export default function WebPage() {
         safeSearch: polForm.safeSearch,
       };
       if (polForm.companyId) payload.companyId = polForm.companyId;
-      const res = await fetch('/api/rmm/webfilter/policies', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+
+      let res: Response;
+      if (editingPolicyId) {
+        // Editar política existente
+        res = await fetch(`/api/rmm/webfilter/policies/${editingPolicyId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        // Criar nova política
+        res = await fetch('/api/rmm/webfilter/policies', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
       if (res.ok) {
         await loadPolicies();
         setShowForm(false);
-        setAllMachinesSelected(true);
-        setCompanyMachines([]);
-        setFormError('');
-        setPolForm({ name: '', companyId: '', mode: 'blacklist', blockedDomains: '', blockedCategories: [], blockedKeywords: '', machineIds: [], logOnly: false, safeSearch: true });
+        resetPolicyForm();
       } else {
         const err = await res.json().catch(() => ({}));
-        setFormError(err?.error || `Erro ao criar política (${res.status}). Verifique os logs do servidor.`);
+        setFormError(err?.error || `Erro ao ${editingPolicyId ? 'atualizar' : 'criar'} política (${res.status}).`);
       }
     } catch (e: any) {
       setFormError(`Erro de conexão: ${e.message}`);
@@ -444,10 +482,10 @@ export default function WebPage() {
                         <td className="px-4 py-3 font-mono text-xs tm-text">{l.domain}</td>
                         <td className="px-4 py-3 tm-text-muted text-xs max-w-[250px] truncate" title={l.url}>{l.url}</td>
                         <td className="px-4 py-3 text-xs">
-                          {l.categoryMatched ? <span className="text-orange-400">{l.categoryMatched}</span> : <span className="tm-text-muted">—</span>}
+                          {l.category?.name ? <span className="text-orange-400">{l.category.name}</span> : l.reason ? <span className="text-yellow-400">{l.reason}</span> : <span className="tm-text-muted">—</span>}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs tm-text">{l.machine?.hostname || '—'}</td>
-                        <td className="px-4 py-3 tm-text-muted text-xs">{new Date(l.timestamp).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
+                        <td className="px-4 py-3 tm-text-muted text-xs">{l.eventAt ? new Date(l.eventAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'}</td>
                       </motion.tr>
                     ))}
                   </tbody>
@@ -462,7 +500,7 @@ export default function WebPage() {
       {tab === 'policies' && (
         <>
           <div className="flex justify-end">
-            <button onClick={() => { setFormType('policy'); setShowForm(!showForm); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm flex items-center gap-2">
+            <button onClick={() => { resetPolicyForm(); setFormType('policy'); setShowForm(!showForm); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm flex items-center gap-2">
               <Plus size={14} /> Nova Política
             </button>
           </div>
@@ -471,7 +509,7 @@ export default function WebPage() {
             {showForm && formType === 'policy' && (
               <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
                 className="tm-bg-card border tm-border rounded-xl p-5 space-y-4">
-                <h3 className="font-semibold tm-text">Nova Política Web Filter</h3>
+                <h3 className="font-semibold tm-text">{editingPolicyId ? 'Editar Política Web Filter' : 'Nova Política Web Filter'}</h3>
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs tm-text-secondary">Nome da Política *</label>
@@ -624,9 +662,9 @@ export default function WebPage() {
                 <div className="flex gap-2">
                   <button onClick={handleCreatePolicy} disabled={saving || !polForm.name}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm disabled:opacity-50">
-                    {saving ? 'Salvando...' : 'Criar Política'}
+                    {saving ? 'Salvando...' : editingPolicyId ? 'Salvar Alterações' : 'Criar Política'}
                   </button>
-                  <button onClick={() => { setShowForm(false); setFormError(''); }} className="px-4 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">Cancelar</button>
+                  <button onClick={() => { setShowForm(false); resetPolicyForm(); }} className="px-4 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">Cancelar</button>
                 </div>
               </motion.div>
             )}
@@ -662,6 +700,10 @@ export default function WebPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      <button onClick={() => handleEditPolicy(p)}
+                        className="p-1.5 rounded text-blue-400 hover:bg-blue-500/10 transition-colors" title="Editar">
+                        <Edit2 size={16} />
+                      </button>
                       <button onClick={() => handleTogglePolicy(p.id, p.isActive)}
                         className={`p-1.5 rounded transition-colors ${p.isActive ? 'text-green-400 hover:bg-green-500/10' : 'tm-text-muted hover:bg-white/10'}`}
                         title={p.isActive ? 'Desativar' : 'Ativar'}>

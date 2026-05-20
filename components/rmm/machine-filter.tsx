@@ -72,8 +72,14 @@ export default function MachineFilter({ value, onChange, className }: MachineFil
     onChange(machineId);
   };
 
-  // Helper: monitorado = tem agentVersion v2
-  const isMonitored = (m: MachineOption) => !!m.agentVersion && m.agentVersion.startsWith('2');
+  // Helper: indicador de versão do agente
+  // V3+ = verde, V2 = azul, V1/sem versão = cinza
+  const getVersionIndicator = (m: MachineOption) => {
+    if (!m.agentVersion) return '⚪'; // sem agente
+    if (m.agentVersion.startsWith('3')) return '🟢'; // V3
+    if (m.agentVersion.startsWith('2')) return '🔵'; // V2
+    return '⚫'; // V1 ou outro
+  };
 
   return (
     <div className={`space-y-2 ${className || ''}`}>
@@ -93,7 +99,7 @@ export default function MachineFilter({ value, onChange, className }: MachineFil
           </select>
         </div>
 
-        {/* Filtro por máquina — agora com indicador de monitoramento */}
+        {/* Filtro por máquina — indicador: ⚫ V1 | 🔵 V2 | 🟢 V3 | ⚪ sem agente */}
         <div className="flex items-center gap-2 flex-1">
           <Monitor size={16} className="tm-text-muted flex-shrink-0" />
           <select
@@ -104,8 +110,7 @@ export default function MachineFilter({ value, onChange, className }: MachineFil
             <option value="">Selecione uma máquina ({filteredMachines.length})</option>
             {filteredMachines.map(m => (
               <option key={m.id} value={m.id}>
-                {isMonitored(m) ? '🟢 ' : '⚪ '}
-                {m.hostname}{m.ipAddress ? ` (${m.ipAddress})` : ''}
+                {getVersionIndicator(m)} {m.hostname}{m.ipAddress ? ` (${m.ipAddress})` : ''}
                 {!selectedCompany && m.company?.name ? ` — ${m.company.name}` : ''}
               </option>
             ))}

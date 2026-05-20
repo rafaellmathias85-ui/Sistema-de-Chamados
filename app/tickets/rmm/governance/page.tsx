@@ -13,6 +13,7 @@ import {
 interface GovStats {
   endpointsMonitored: number;
   usbEvents: number;
+  usbMonitoredMachines: number;
   webActivities: number;
   drivers: number;
   relayDiscovered: number;
@@ -89,7 +90,7 @@ export default function GovernanceDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: 'Endpoints Monitorados', value: stats?.endpointsMonitored || 0, icon: Monitor, color: 'text-blue-400' },
-          { label: 'Eventos USB', value: stats?.usbEvents || 0, icon: Usb, color: 'text-orange-400' },
+          { label: 'Eventos USB', value: stats?.usbEvents || 0, icon: Usb, color: 'text-orange-400', sublabel: `${stats?.usbMonitoredMachines || 0} máq. monitoradas` },
           { label: 'Máq. Web Monitor.', value: stats?.webActivities || 0, icon: Globe, color: 'text-cyan-400' },
           { label: 'Máq. Monitoradas', value: stats?.totalMachines || 0, icon: Radio, color: 'text-purple-400' },
         ].map((card, i) => (
@@ -105,6 +106,7 @@ export default function GovernanceDashboard() {
               <p className="text-2xl font-bold tm-text">{card.value}</p>
             </div>
             <p className="text-xs tm-text-secondary mt-1">{card.label}</p>
+            {(card as any).sublabel && <p className="text-[10px] tm-text-muted">{(card as any).sublabel}</p>}
           </motion.div>
         ))}
       </div>
