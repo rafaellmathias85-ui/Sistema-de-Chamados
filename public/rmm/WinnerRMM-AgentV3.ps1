@@ -434,6 +434,7 @@ function Send-Snapshot($machineId) {
     try {
         $snapshot = @{
             machineId     = $machineId
+            agentToken    = $COMPANY_TOKEN
             cpuPercent    = Get-CpuUsage
             memoryPercent = Get-RamUsage
             processesJson = (Get-TopProcesses | ConvertTo-Json -Depth 3 -Compress)
@@ -778,7 +779,7 @@ function Check-AgentUpdate {
             }
 
             # Substituir agente atual
-            $agentFile = "$InstallDir\agente_rmm.ps1"
+            $agentFile = "$InstallDir\agente_rmm_v3.ps1"
             Copy-Item -Path $stagingFile -Destination $agentFile -Force
             Remove-Item $stagingFile -Force -ErrorAction SilentlyContinue
             Write-Log "[SelfUpdate] Agente atualizado para $($resp.new_version). Reiniciando servico..."

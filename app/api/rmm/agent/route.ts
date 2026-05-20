@@ -78,7 +78,7 @@ $ErrorActionPreference = "Stop"
 $InstallDir = "C:\\ProgramData\\WinnerRMM"
 $StagingDir = "$InstallDir\\staging"
 $ModulesDir = "$InstallDir\\modules"
-$AgentFile = "$InstallDir\\agente_rmm.ps1"
+$AgentFile = "$InstallDir\\agente_rmm_v3.ps1"
 $WatchdogFile = "$InstallDir\\watchdog.ps1"
 $NssmExe = "$InstallDir\\nssm.exe"
 $ServiceName = "WinnerRMMService"
@@ -217,24 +217,40 @@ if (!(Test-Path $NssmExe)) {
     }
 }
 
+# Exclusao no Windows Defender para evitar bloqueio do agente
+Add-MpPreference -ExclusionPath "$InstallDir" -ErrorAction SilentlyContinue
+Add-MpPreference -ExclusionProcess "powershell.exe" -ErrorAction SilentlyContinue
+Write-Host "       Exclusao Defender configurada" -ForegroundColor Green
+
 Write-Host "[6/7] Registrando Windows Service..." -ForegroundColor Cyan
 if (Test-Path $NssmExe) {
     # Instalar via NSSM (preferido)
-    & $NssmExe install $ServiceName "powershell.exe" "-ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" 2>&1 | Out-Null
+    & $NssmExe install $ServiceName "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" "-ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" 2>&1 | Out-Null
     & $NssmExe set $ServiceName DisplayName "Winner RMM Agent" 2>&1 | Out-Null
     & $NssmExe set $ServiceName Description "Agente de monitoramento remoto - Winner Tecnologia" 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppDirectory "$InstallDir" 2>&1 | Out-Null
     & $NssmExe set $ServiceName Start SERVICE_AUTO_START 2>&1 | Out-Null
     & $NssmExe set $ServiceName ObjectName LocalSystem 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppExit Default Restart 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppRestartDelay 10000 2>&1 | Out-Null
     & $NssmExe set $ServiceName AppStdout "$InstallDir\\service_stdout.log" 2>&1 | Out-Null
     & $NssmExe set $ServiceName AppStderr "$InstallDir\\service_stderr.log" 2>&1 | Out-Null
     & $NssmExe set $ServiceName AppRotateFiles 1 2>&1 | Out-Null
     & $NssmExe set $ServiceName AppRotateBytes 5242880 2>&1 | Out-Null
     Write-Host "       Service registrado via NSSM" -ForegroundColor Green
+
+    # Verificacao de sanidade: confirmar que AppParameters aponta para agente_rmm_v3
+    $appCheck = & $NssmExe get $ServiceName AppParameters 2>&1
+    if ($appCheck -and $appCheck -notlike "*agente_rmm_v3*") {
+        Write-Host "  [AVISO] Path incorreto detectado: $appCheck" -ForegroundColor Red
+        Write-Host "  [FIX] Reconfigurando AppParameters..." -ForegroundColor Yellow
+        & $NssmExe set $ServiceName AppParameters "-ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" 2>&1 | Out-Null
+    }
 } else {
     # Fallback: registrar via sc.exe + wrapper script
     Write-Host "       Usando sc.exe como fallback..." -ForegroundColor Yellow
     $wrapperFile = "$InstallDir\\service_wrapper.bat"
-    Set-Content -Path $wrapperFile -Value "@echo off\`r\`npowershell.exe -ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" -Encoding ASCII
+    Set-Content -Path $wrapperFile -Value "@echo off\`r\`nC:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" -Encoding ASCII
     & sc.exe create $ServiceName binPath= "cmd.exe /c \`"$wrapperFile\`"" start= auto DisplayName= "Winner RMM Agent" 2>&1 | Out-Null
     & sc.exe description $ServiceName "Agente de monitoramento remoto - Winner Tecnologia" 2>&1 | Out-Null
 }
@@ -244,14 +260,42 @@ if (Test-Path $NssmExe) {
 & sc.exe failure $ServiceName reset= 86400 actions= restart/10000/restart/30000/restart/60000 2>&1 | Out-Null
 Write-Host "       SCM failure recovery configurado (10s/30s/60s)" -ForegroundColor Green
 
-# Iniciar o service (com retry)
+# Criar wrapper de execucao com captura de erros
+$runnerLines = @(
+    '# Service Runner - Wrapper com captura de erros'
+    '$ErrorActionPreference = "Stop"'
+    ('$logPath = "' + $InstallDir + '\service_crash.log"')
+    'try {'
+    ('    & "' + $AgentFile + '"')
+    '} catch {'
+    '    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"'
+    '    $msg = "[$ts] CRASH: $($_.Exception.Message) | Stack: $($_.ScriptStackTrace) | Line: $($_.InvocationInfo.ScriptLineNumber)"'
+    '    Add-Content -Path $logPath -Value $msg -ErrorAction SilentlyContinue'
+    '    Start-Sleep -Seconds 10'
+    '    exit 1'
+    '}'
+)
+$runnerFile = "$InstallDir\\service_runner.ps1"
+Set-Content -Path $runnerFile -Value ($runnerLines -join [Environment]::NewLine) -Encoding UTF8 -Force
+
+# Reconfigurar NSSM para usar o runner (com captura de erros)
+if (Test-Path $NssmExe) {
+    & $NssmExe set $ServiceName Application "powershell.exe" 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppParameters ("-ExecutionPolicy Bypass -NonInteractive -File " + '"' + $runnerFile + '"') 2>&1 | Out-Null
+}
+
+# Iniciar o service (com retry e ErrorAction controlado)
 $svcStarted = $false
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = "SilentlyContinue"
 for ($startAttempt = 1; $startAttempt -le 3; $startAttempt++) {
-    if (Test-Path $NssmExe) {
-        & $NssmExe start $ServiceName 2>&1 | Out-Null
-    } else {
-        & sc.exe start $ServiceName 2>&1 | Out-Null
-    }
+    try {
+        if (Test-Path $NssmExe) {
+            & $NssmExe start $ServiceName 2>&1 | Out-Null
+        } else {
+            & sc.exe start $ServiceName 2>&1 | Out-Null
+        }
+    } catch {}
     Start-Sleep -Seconds 5
     $svcState = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($svcState -and $svcState.Status -eq 'Running') {
@@ -261,11 +305,18 @@ for ($startAttempt = 1; $startAttempt -le 3; $startAttempt++) {
     Write-Host "       Tentativa $startAttempt/3 - service ainda nao iniciou, aguardando..." -ForegroundColor Yellow
     Start-Sleep -Seconds 3
 }
+$ErrorActionPreference = $prevEAP
 if (-not $svcStarted) {
     Write-Host "       [DIAG] Verificando logs de erro do service..." -ForegroundColor Yellow
-    if (Test-Path "$InstallDir\\service_stderr.log") {
-        $errContent = Get-Content "$InstallDir\\service_stderr.log" -Tail 10 -ErrorAction SilentlyContinue
-        if ($errContent) { $errContent | ForEach-Object { Write-Host "              $_" -ForegroundColor DarkGray } }
+    $crashLog = "$InstallDir\\service_crash.log"
+    $stderrLog = "$InstallDir\\service_stderr.log"
+    if (Test-Path $crashLog) {
+        Write-Host "       [DIAG] === service_crash.log ===" -ForegroundColor Red
+        Get-Content $crashLog -Tail 15 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "              $_" -ForegroundColor DarkGray }
+    }
+    if (Test-Path $stderrLog) {
+        Write-Host "       [DIAG] === service_stderr.log ===" -ForegroundColor Red
+        Get-Content $stderrLog -Tail 15 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "              $_" -ForegroundColor DarkGray }
     }
 }
 
@@ -334,7 +385,7 @@ if ($svcStatus -ne "RODANDO" -and $svcCheck) {
         Write-Host "  [DIAGNOSTICO] Verifique o log: $InstallDir\\service_stderr.log" -ForegroundColor Yellow
         # Verificar se o agente roda manualmente
         Write-Host "  [DIAGNOSTICO] Testando execucao manual do agente..." -ForegroundColor DarkGray
-        $testProc = Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+        $testProc = Start-Process -FilePath "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -NonInteractive -File \`"$AgentFile\`"" -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
         if ($testProc) {
             Start-Sleep -Seconds 5
             if (-not $testProc.HasExited) {
@@ -841,7 +892,7 @@ export async function POST(request: NextRequest) {
 
 $ErrorActionPreference = "Stop"
 $OutputDir = "$env:TEMP\\WinnerRMM_Build"
-$AgentPs1 = "$OutputDir\\agente_rmm.ps1"
+$AgentPs1 = "$OutputDir\\agente_rmm_v3.ps1"
 $AgentExe = "$OutputDir\\WinnerRMM_Agent.exe"
 
 Write-Host "Winner Tecnologia - Compilador de Agente RMM" -ForegroundColor Cyan
