@@ -37,6 +37,7 @@ const defaultOptions: sanitizeHtml.IOptions = {
     img: ['http', 'https', 'data', 'cid'],
     a: ['http', 'https', 'mailto', 'tel'],
   },
+  allowedSchemesAppliedToAttributes: ['href', 'src', 'cite'],
   allowProtocolRelative: true,
   // Limita CSS inline as propriedades seguras
   allowedStyles: {
