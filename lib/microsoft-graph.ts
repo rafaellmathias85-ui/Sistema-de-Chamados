@@ -849,17 +849,21 @@ export async function processEmailToTicket(
               existingTicketId,
               { id: user.id, name: user.name },
             );
-            // Se há imagens inline, atualizar o contentHtml da ultima mensagem
+            // Se há imagens inline, atualizar contentHtml + bodyClean + bodyQuoted da ultima mensagem
             if (Object.keys(cidMap).length > 0) {
               const lastMsg = await prisma.ticketMessage.findFirst({
                 where: { ticketId: existingTicketId },
                 orderBy: { createdAt: 'desc' },
-                select: { id: true, contentHtml: true },
+                select: { id: true, contentHtml: true, bodyClean: true, bodyQuoted: true },
               });
               if (lastMsg?.contentHtml) {
                 await prisma.ticketMessage.update({
                   where: { id: lastMsg.id },
-                  data: { contentHtml: replaceCidReferences(lastMsg.contentHtml, cidMap) },
+                  data: {
+                    contentHtml: replaceCidReferences(lastMsg.contentHtml, cidMap),
+                    ...(lastMsg.bodyClean  ? { bodyClean:  replaceCidReferences(lastMsg.bodyClean,  cidMap) } : {}),
+                    ...(lastMsg.bodyQuoted ? { bodyQuoted: replaceCidReferences(lastMsg.bodyQuoted, cidMap) } : {}),
+                  },
                 });
               }
             }
