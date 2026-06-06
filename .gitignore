@@ -43,6 +43,7 @@ Thumbs.db
 uploads/
 public/uploads/
 public/backup/
+public/anexos
 
 # Yarn Berry
 .yarn/install-state.gz
