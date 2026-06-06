@@ -498,70 +498,19 @@ async function exportPDF(headers: string[], data: (string | number | null)[][], 
 </html>`;
 
   try {
-    // Criar requisição de PDF
-    const createResponse = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deployment_token: process.env.ABACUSAI_API_KEY,
-        html_content: html,
-        pdf_options: {
-          format: 'A4',
-          landscape: headers.length > 8,
-          margin: { top: '15mm', right: '10mm', bottom: '15mm', left: '10mm' },
-          print_background: true
-        }
-      })
+    const { htmlToPdf } = await import('@/lib/pdf');
+    const pdfBuffer = await htmlToPdf(html, {
+      format: 'A4',
+      landscape: headers.length > 8,
+      margin: { top: '15mm', right: '10mm', bottom: '15mm', left: '10mm' },
+      printBackground: true,
     });
-
-    if (!createResponse.ok) {
-      throw new Error('Falha ao criar requisição de PDF');
-    }
-
-    const { request_id } = await createResponse.json();
-    if (!request_id) {
-      throw new Error('ID de requisição não retornado');
-    }
-
-    // Aguardar geração do PDF
-    const maxAttempts = 60;
-    let attempts = 0;
-
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const statusResponse = await fetch('https://apps.abacus.ai/api/getConvertHtmlToPdfStatus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          request_id,
-          deployment_token: process.env.ABACUSAI_API_KEY
-        })
-      });
-
-      const statusResult = await statusResponse.json();
-      const status = statusResult?.status || 'FAILED';
-      const result = statusResult?.result || null;
-
-      if (status === 'SUCCESS') {
-        if (result && result.result) {
-          const pdfBuffer = Buffer.from(result.result, 'base64');
-          return new NextResponse(pdfBuffer, {
-            headers: {
-              'Content-Type': 'application/pdf',
-              'Content-Disposition': `attachment; filename="relatorio_${dateStr}.pdf"`
-            }
-          });
-        }
-        throw new Error('PDF gerado mas sem dados');
-      } else if (status === 'FAILED') {
-        throw new Error(result?.error || 'Falha na geração do PDF');
+    return new NextResponse(pdfBuffer, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="relatorio_${dateStr}.pdf"`
       }
-
-      attempts++;
-    }
-
-    throw new Error('Timeout na geração do PDF');
+    });
 
   } catch (error) {
     console.error('Erro ao gerar PDF:', error);

@@ -340,47 +340,16 @@ export function buildQuoteEmailHtml(quote: any, tenant: any): string {
 </body></html>`;
 }
 
-// Gera PDF via API Abacus, retornando Buffer (ou null se falhar)
+// Gera PDF via Puppeteer (Chromium local), retornando Buffer (ou null se falhar)
 export async function generateQuotePdfBuffer(html: string): Promise<Buffer | null> {
   try {
-    const createRes = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deployment_token: process.env.ABACUSAI_API_KEY,
-        html_content: html,
-        pdf_options: {
-          format: 'A4',
-          landscape: false,
-          margin: { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' },
-          print_background: true,
-        },
-      }),
+    const { htmlToPdf } = await import('./pdf');
+    return await htmlToPdf(html, {
+      format: 'A4',
+      landscape: false,
+      margin: { top: '0mm', bottom: '0mm', left: '0mm', right: '0mm' },
+      printBackground: true,
     });
-    if (!createRes.ok) {
-      console.error('[QuotePDF] create failed:', await createRes.text());
-      return null;
-    }
-    const { request_id } = await createRes.json();
-    if (!request_id) return null;
-
-    for (let i = 0; i < 60; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      const statusRes = await fetch('https://apps.abacus.ai/api/getConvertHtmlToPdfStatus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id, deployment_token: process.env.ABACUSAI_API_KEY }),
-      });
-      const statusData = await statusRes.json();
-      if (statusData?.status === 'SUCCESS' && statusData?.result?.result) {
-        return Buffer.from(statusData.result.result, 'base64');
-      }
-      if (statusData?.status === 'FAILED') {
-        console.error('[QuotePDF] failed:', statusData?.result);
-        return null;
-      }
-    }
-    return null;
   } catch (e) {
     console.error('[QuotePDF] erro:', e);
     return null;

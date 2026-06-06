@@ -11,6 +11,7 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  serverExternalPackages: ['puppeteer'],
   images: { unoptimized: true },
   webpack: (config, { isServer }) => {
     if (!isServer) {

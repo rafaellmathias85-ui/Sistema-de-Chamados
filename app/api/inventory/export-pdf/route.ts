@@ -127,58 +127,20 @@ export async function GET(request: NextRequest) {
   <div class="footer">Winner Tecnologia · Inventário de Máquinas</div>
 </body></html>`;
 
-    // Call HTML2PDF API
-    const createRes = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deployment_token: process.env.ABACUSAI_API_KEY,
-        html_content: html,
-        pdf_options: {
-          format: 'A4',
-          landscape: true,
-          margin: { top: '15mm', bottom: '15mm', left: '10mm', right: '10mm' },
-          print_background: true,
-        },
-      }),
+    const { htmlToPdf } = await import('@/lib/pdf');
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const pdfBuffer = await htmlToPdf(html, {
+      format: 'A4',
+      landscape: true,
+      margin: { top: '15mm', bottom: '15mm', left: '10mm', right: '10mm' },
+      printBackground: true,
     });
-
-    if (!createRes.ok) {
-      console.error('PDF create failed:', await createRes.text());
-      return NextResponse.json({ error: 'Falha ao gerar PDF' }, { status: 500 });
-    }
-
-    const { request_id } = await createRes.json();
-    if (!request_id) {
-      return NextResponse.json({ error: 'Sem request_id do PDF' }, { status: 500 });
-    }
-
-    // Poll for result
-    for (let i = 0; i < 120; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      const statusRes = await fetch('https://apps.abacus.ai/api/getConvertHtmlToPdfStatus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id, deployment_token: process.env.ABACUSAI_API_KEY }),
-      });
-      const statusData = await statusRes.json();
-      if (statusData?.status === 'SUCCESS' && statusData?.result?.result) {
-        const pdfBuffer = Buffer.from(statusData.result.result, 'base64');
-        const dateStr = new Date().toISOString().slice(0, 10);
-        return new NextResponse(pdfBuffer, {
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="inventario-${dateStr}.pdf"`,
-          },
-        });
-      }
-      if (statusData?.status === 'FAILED') {
-        console.error('PDF generation failed:', statusData?.result);
-        return NextResponse.json({ error: 'Falha na geração do PDF' }, { status: 500 });
-      }
-    }
-
-    return NextResponse.json({ error: 'Timeout na geração do PDF' }, { status: 500 });
+    return new NextResponse(pdfBuffer, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="inventario-${dateStr}.pdf"`,
+      },
+    });
   } catch (error) {
     console.error('Error generating inventory PDF:', error);
     return NextResponse.json({ error: 'Erro ao gerar relatório PDF' }, { status: 500 });

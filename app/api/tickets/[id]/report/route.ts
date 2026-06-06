@@ -112,54 +112,18 @@ export async function GET(
     const tenant = await prisma.tenant.findFirst();
     const html = buildReportHtml(ticket, messages, tenant);
 
-    const createRes = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deployment_token: process.env.ABACUSAI_API_KEY,
-        html_content: html,
-        pdf_options: {
-          format: 'A4',
-          margin: { top: '20mm', bottom: '20mm', left: '18mm', right: '18mm' },
-          print_background: true,
-        },
-      }),
+    const { htmlToPdf } = await import('@/lib/pdf');
+    const pdfBuffer = await htmlToPdf(html, {
+      format: 'A4',
+      margin: { top: '20mm', bottom: '20mm', left: '18mm', right: '18mm' },
+      printBackground: true,
     });
-
-    if (!createRes.ok) {
-      console.error('PDF create failed:', await createRes.text());
-      return NextResponse.json({ error: 'Falha ao gerar PDF' }, { status: 500 });
-    }
-
-    const { request_id } = await createRes.json();
-    if (!request_id) {
-      return NextResponse.json({ error: 'Sem request_id do PDF' }, { status: 500 });
-    }
-
-    for (let i = 0; i < 120; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      const statusRes = await fetch('https://apps.abacus.ai/api/getConvertHtmlToPdfStatus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id, deployment_token: process.env.ABACUSAI_API_KEY }),
-      });
-      const statusData = await statusRes.json();
-      if (statusData?.status === 'SUCCESS' && statusData?.result?.result) {
-        const pdfBuffer = Buffer.from(statusData.result.result, 'base64');
-        return new NextResponse(pdfBuffer, {
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="relatorio_chamado_${ticket.number}.pdf"`,
-          },
-        });
-      }
-      if (statusData?.status === 'FAILED') {
-        console.error('PDF generation failed:', statusData?.result);
-        return NextResponse.json({ error: 'Falha na gera\u00e7\u00e3o do PDF' }, { status: 500 });
-      }
-    }
-
-    return NextResponse.json({ error: 'Timeout na gera\u00e7\u00e3o do PDF' }, { status: 500 });
+    return new NextResponse(pdfBuffer, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="relatorio_chamado_${ticket.number}.pdf"`,
+      },
+    });
   } catch (error) {
     console.error('Error generating report:', error);
     return NextResponse.json({ error: 'Erro ao gerar relat\u00f3rio' }, { status: 500 });
