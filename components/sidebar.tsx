@@ -152,7 +152,7 @@ export default function Sidebar({ user }: SidebarProps) {
       case 'finance':
         return isAdmin || isFinance;
       case 'quotes':
-        return isAdmin || isSupport || isFinance || isClient;
+        return isAdmin || isFinance;
       case 'reports':
         return isStaff;
       case 'agenda':
