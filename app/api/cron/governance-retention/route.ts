@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,51 +29,44 @@ export async function GET(req: NextRequest) {
   const cutoff30 = new Date(now)
   cutoff30.setDate(cutoff30.getDate() - 30)
 
-  const webActivityDeleted = await prisma.$executeRaw`
-    DELETE FROM "WebActivity" WHERE id IN (
-      SELECT id FROM "WebActivity" WHERE "createdAt" < ${cutoff90} LIMIT 10000
-    )
-  `
+  const run = async (query: () => Promise<number>, label: string) => {
+    try { return await query() } catch (e: any) { console.error(`[retention] ${label}:`, e?.message); return -1 }
+  }
 
-  const activitySessionsDeleted = await prisma.$executeRaw`
-    DELETE FROM "EndpointActivitySession" WHERE id IN (
-      SELECT id FROM "EndpointActivitySession" WHERE "startedAt" < ${cutoff90} LIMIT 10000
-    )
-  `
+  const [webActivity, activitySessions, execLogs, usbEvents, snapshots, diskMetrics] = await Promise.all([
+    run(() => prisma.$executeRaw`
+      DELETE FROM "WebActivity" WHERE id IN (
+        SELECT id FROM "WebActivity" WHERE "createdAt" < ${cutoff90} LIMIT 10000
+      )`, 'WebActivity'),
 
-  const execLogsDeleted = await prisma.$executeRaw`
-    DELETE FROM "RmmExecLog" WHERE id IN (
-      SELECT id FROM "RmmExecLog" WHERE "createdAt" < ${cutoff90} LIMIT 10000
-    )
-  `
+    run(() => prisma.$executeRaw`
+      DELETE FROM "EndpointActivitySession" WHERE id IN (
+        SELECT id FROM "EndpointActivitySession" WHERE "startedAt" < ${cutoff90} LIMIT 10000
+      )`, 'EndpointActivitySession'),
 
-  const usbEventsDeleted = await prisma.$executeRaw`
-    DELETE FROM "UsbEvent" WHERE id IN (
-      SELECT id FROM "UsbEvent" WHERE "eventAt" < ${cutoff180} LIMIT 10000
-    )
-  `
+    run(() => prisma.$executeRaw`
+      DELETE FROM "RmmExecLog" WHERE id IN (
+        SELECT id FROM "RmmExecLog" WHERE "createdAt" < ${cutoff90} LIMIT 10000
+      )`, 'RmmExecLog'),
 
-  const snapshotsDeleted = await prisma.$executeRaw`
-    DELETE FROM "MachineSnapshot" WHERE id IN (
-      SELECT id FROM "MachineSnapshot" WHERE "createdAt" < ${cutoff30} LIMIT 10000
-    )
-  `
+    run(() => prisma.$executeRaw`
+      DELETE FROM "UsbEvent" WHERE id IN (
+        SELECT id FROM "UsbEvent" WHERE "eventAt" < ${cutoff180} LIMIT 10000
+      )`, 'UsbEvent'),
 
-  const diskMetricsDeleted = await prisma.$executeRaw`
-    DELETE FROM "DiskHealthMetric" WHERE id IN (
-      SELECT id FROM "DiskHealthMetric" WHERE "measuredAt" < ${cutoff180} LIMIT 10000
-    )
-  `
+    run(() => prisma.$executeRaw`
+      DELETE FROM "MachineSnapshot" WHERE id IN (
+        SELECT id FROM "MachineSnapshot" WHERE "createdAt" < ${cutoff30} LIMIT 10000
+      )`, 'MachineSnapshot'),
+
+    run(() => prisma.$executeRaw`
+      DELETE FROM "DiskHealthMetric" WHERE id IN (
+        SELECT id FROM "DiskHealthMetric" WHERE "collectedAt" < ${cutoff180} LIMIT 10000
+      )`, 'DiskHealthMetric'),
+  ])
 
   return NextResponse.json({
     ok: true,
-    deleted: {
-      webActivity: webActivityDeleted,
-      activitySessions: activitySessionsDeleted,
-      execLogs: execLogsDeleted,
-      usbEvents: usbEventsDeleted,
-      snapshots: snapshotsDeleted,
-      diskMetrics: diskMetricsDeleted,
-    },
+    deleted: { webActivity, activitySessions, execLogs, usbEvents, snapshots, diskMetrics },
   })
 }
