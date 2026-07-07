@@ -325,6 +325,7 @@ fi
 sudo -u "$APP_USER" \
   PORT=$PORT \
   NODE_ENV=production \
+  PUPPETEER_EXECUTABLE_PATH='/home/ubuntu/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome' \
   RUNNER_TRACKING_ID="" \
   pm2 start node_modules/next/dist/bin/next \
     --name "$PM2_NAME" \
