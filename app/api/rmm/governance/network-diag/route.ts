@@ -392,14 +392,20 @@ export async function GET(request: NextRequest) {
     }
 
     if (view === 'ports' && deviceId) {
-      // Pegar último snapshot de cada porta
       const ports = await prisma.$queryRaw`
         SELECT DISTINCT ON ("portIdx") *
         FROM "SwitchPortHistory"
         WHERE "deviceId" = ${deviceId}
         ORDER BY "portIdx", "collectedAt" DESC
       ` as any[];
-      return NextResponse.json(ports);
+      const serialized = ports.map((p: any) => ({
+        ...p,
+        rxBytes: p.rxBytes != null ? p.rxBytes.toString() : null,
+        txBytes: p.txBytes != null ? p.txBytes.toString() : null,
+        rxErrors: p.rxErrors != null ? p.rxErrors.toString() : null,
+        txErrors: p.txErrors != null ? p.txErrors.toString() : null,
+      }));
+      return NextResponse.json(serialized);
     }
 
     return NextResponse.json({ error: 'View inválida' }, { status: 400 });
