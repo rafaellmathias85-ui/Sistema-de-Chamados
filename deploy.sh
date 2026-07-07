@@ -167,6 +167,33 @@ sudo chmod -R 755 "$UPLOADS_PATH" 2>/dev/null || true
 echo "[Deploy] ✅ $UPLOADS_PATH ($(du -sh $UPLOADS_PATH 2>/dev/null | cut -f1))"
 
 # ============================================================
+# 3b. DEPENDÊNCIAS DO SISTEMA (Chrome/Puppeteer)
+# ============================================================
+echo ""
+echo "[Deploy] === DEPENDÊNCIAS DO CHROME ==="
+if ! dpkg -l libatk1.0-0 >/dev/null 2>&1; then
+  echo "[Deploy] Instalando dependências do Chrome/Puppeteer..."
+  sudo apt-get install -y \
+    libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+    libxrandr2 libgbm1 libasound2 libpango-1.0-0 \
+    libcairo2 libnss3 libnspr4 libxss1 libxtst6 2>/dev/null
+  echo "[Deploy] ✅ Dependências do Chrome instaladas"
+else
+  echo "[Deploy] ✅ Dependências do Chrome já presentes"
+fi
+
+# Certificado de assinatura do agente RMM (não web-acessível)
+CERTS_DIR="/var/www/helpdesk/certs"
+sudo mkdir -p "$CERTS_DIR"
+if [ -f "$APP_DIR/certs/WinnerRMM-CodeSigning.cer" ]; then
+  sudo cp "$APP_DIR/certs/WinnerRMM-CodeSigning.cer" "$CERTS_DIR/"
+  sudo chmod 644 "$CERTS_DIR/WinnerRMM-CodeSigning.cer"
+  sudo chown root:root "$CERTS_DIR/WinnerRMM-CodeSigning.cer"
+  echo "[Deploy] ✅ Certificado salvo em $CERTS_DIR/WinnerRMM-CodeSigning.cer"
+fi
+
+# ============================================================
 # 4. CORREÇÕES ABACUS AI → VPS
 # ============================================================
 if grep -q '/home/ubuntu/winner_tecnologia_site' prisma/schema.prisma 2>/dev/null; then
