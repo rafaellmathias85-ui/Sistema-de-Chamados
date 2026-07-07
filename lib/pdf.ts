@@ -10,6 +10,7 @@ interface PdfOptions {
 export async function htmlToPdf(html: string, options: PdfOptions = {}): Promise<Buffer> {
   const browser = await puppeteer.launch({
     headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',

@@ -16,7 +16,8 @@ module.exports = {
     node_args: '--max-old-space-size=1024',
     env: {
       NODE_ENV: 'production',
-      PORT: '3000'
+      PORT: '3000',
+      PUPPETEER_EXECUTABLE_PATH: '/home/ubuntu/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome'
     }
   }]
 };
