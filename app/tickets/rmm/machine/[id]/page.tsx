@@ -95,6 +95,20 @@ interface Snapshot {
 
 type DetailTab = 'info' | 'processes' | 'services' | 'apps' | 'console';
 
+// Tolerant JSON array parser: handles single-encoded, double-encoded (legacy snapshots), and non-array values.
+const parseJsonArray = (raw: string | null | undefined): any[] => {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    if (typeof parsed === 'string') {
+      const reparsed = JSON.parse(parsed);
+      if (Array.isArray(reparsed)) return reparsed;
+    }
+  } catch { /* empty */ }
+  return [];
+};
+
 export default function MachineDetailPage() {
   const { data: session } = useSession();
   const params = useParams();
@@ -487,8 +501,7 @@ export default function MachineDetailPage() {
           </div>
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             {(() => {
-              let processes: any[] = [];
-              try { processes = snapshot?.processesJson ? JSON.parse(snapshot.processesJson) : []; } catch { /* empty */ }
+              const processes = parseJsonArray(snapshot?.processesJson);
               if (processes.length === 0) {
                 // Try from machine.services field as fallback
                 return <div className="text-center py-8 tm-text-muted">Nenhum snapshot de processos disponível. Aguardando dados do agente.</div>;
@@ -530,11 +543,9 @@ export default function MachineDetailPage() {
           </div>
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             {(() => {
-              let services: any[] = [];
-              try {
-                services = snapshot?.servicesJson ? JSON.parse(snapshot.servicesJson) : [];
-                if (services.length === 0 && machine.services) services = JSON.parse(machine.services);
-              } catch { /* empty */ }
+              const services = parseJsonArray(snapshot?.servicesJson).length > 0
+                ? parseJsonArray(snapshot?.servicesJson)
+                : parseJsonArray(machine.services);
               if (services.length === 0) {
                 return <div className="text-center py-8 tm-text-muted">Nenhum dado de serviços disponível.</div>;
               }
@@ -577,11 +588,9 @@ export default function MachineDetailPage() {
           </div>
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             {(() => {
-              let apps: any[] = [];
-              try {
-                apps = snapshot?.installedAppsJson ? JSON.parse(snapshot.installedAppsJson) : [];
-                if (apps.length === 0 && machine.installedApps) apps = JSON.parse(machine.installedApps);
-              } catch { /* empty */ }
+              const apps = parseJsonArray(snapshot?.installedAppsJson).length > 0
+                ? parseJsonArray(snapshot?.installedAppsJson)
+                : parseJsonArray(machine.installedApps);
               if (apps.length === 0) {
                 return <div className="text-center py-8 tm-text-muted">Nenhum dado de aplicativos disponível.</div>;
               }

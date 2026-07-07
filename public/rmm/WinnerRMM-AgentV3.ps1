@@ -8,7 +8,7 @@
 $ErrorActionPreference = "SilentlyContinue"
 
 # ======= CONFIGURACAO (PREENCHIDO PELO SERVIDOR) =======
-$AGENT_VERSION = "3.0.0"
+$AGENT_VERSION = "3.0.1"
 $API_URL = "{{API_URL}}"
 $COMPANY_TOKEN = "{{COMPANY_TOKEN}}"
 $FALLBACK_API_URL = "{{FALLBACK_API_URL}}"
@@ -553,18 +553,20 @@ function Execute-ScriptContent($content, $scriptType, $taskId) {
         'cmd' {
             $tempFile = Join-Path $tempDir "task_$timestamp.bat"
             $nl = [Environment]::NewLine
-            $header = "@echo off" + $nl + "set `"DesktopPath=$DesktopPath`"" + $nl
+            # chcp 65001 ativa UTF-8 no cmd.exe — necessario para acentos em comandos/caminhos
+            $header = "@echo off" + $nl + "chcp 65001 > nul" + $nl + "set `"DesktopPath=$DesktopPath`"" + $nl
             if ($WingetExe) {
                 $header += "set `"WINGET=$WingetExe`"" + $nl
                 $wingetDir = Split-Path $WingetExe -Parent
                 $header += "set `"PATH=$wingetDir;%PATH%`"" + $nl
             }
-            Set-Content -Path $tempFile -Value ($header + $cleanContent) -Encoding ASCII
+            # UTF-8 sem BOM — cmd.exe + chcp 65001 interpretam corretamente
+            [System.IO.File]::WriteAllText($tempFile, $header + $cleanContent, (New-Object System.Text.UTF8Encoding $false))
             $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$tempFile`"" -NoNewWindow -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
         }
         'vbscript' {
             $tempFile = Join-Path $tempDir "task_$timestamp.vbs"
-            Set-Content -Path $tempFile -Value $cleanContent -Encoding ASCII
+            [System.IO.File]::WriteAllText($tempFile, $cleanContent, (New-Object System.Text.UTF8Encoding $false))
             $proc = Start-Process -FilePath "cscript.exe" -ArgumentList "//NoLogo `"$tempFile`"" -NoNewWindow -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
         }
         'python' {
@@ -597,7 +599,14 @@ function Execute-ScriptContent($content, $scriptType, $taskId) {
         Send-Chunk $taskId "" $true
         $stdoutPos = 0
         $stderrPos = 0
+        $streamTimeout = [TimeSpan]::FromMinutes(10)
+        $streamStart = [DateTime]::Now
         while (-not $proc.HasExited) {
+            if (([DateTime]::Now - $streamStart) -gt $streamTimeout) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                Send-Chunk $taskId "`n[TIMEOUT] Execucao interrompida apos 10 minutos." $false
+                break
+            }
             Start-Sleep -Seconds 2
             try {
                 if (Test-Path $stdoutFile) {
@@ -648,28 +657,36 @@ function Execute-ScriptContent($content, $scriptType, $taskId) {
 }
 
 function Check-Tasks($machineId) {
-    try {
-        $headers = @{ Authorization = "Bearer $COMPANY_TOKEN" }
-        $resp = Invoke-ApiRequest -Endpoint "/tasks/$machineId" -Method "GET" -Headers $headers -TimeoutSec 15
-        if ($resp -and $resp.task -and $resp.task.id) {
-            $taskId = $resp.task.id
-            $rawCommand = $resp.task.command
-            $rawCommand = $rawCommand -replace '^\s*@@SCRIPTTYPE:\w+@@\s*', ''
-            $scriptType = if ($resp.task.scriptType -and $resp.task.scriptType -ne 'auto') { $resp.task.scriptType } else { Detect-ScriptType $rawCommand }
-            Write-Log "Executando tarefa $taskId (tipo: $scriptType)"
-            try {
-                $output = Execute-ScriptContent $rawCommand $scriptType $taskId
-                $reportBody = @{ output = $output } | ConvertTo-Json -Depth 3
-                Invoke-ApiRequest -Endpoint "/report/$taskId" -Method "POST" -Body $reportBody -TimeoutSec 30
-                Write-Log "Tarefa $taskId concluida"
-            } catch {
-                $errBody = @{ error = "[$scriptType] $($_.Exception.Message)" } | ConvertTo-Json
-                Invoke-ApiRequest -Endpoint "/report/$taskId" -Method "POST" -Body $errBody -TimeoutSec 15
-                Write-Log "Erro na tarefa $taskId : $($_.Exception.Message)"
+    $maxPerCycle = 3
+    $processed = 0
+    while ($processed -lt $maxPerCycle) {
+        try {
+            $headers = @{ Authorization = "Bearer $COMPANY_TOKEN" }
+            $resp = Invoke-ApiRequest -Endpoint "/tasks/$machineId" -Method "GET" -Headers $headers -TimeoutSec 15
+            if ($resp -and $resp.task -and $resp.task.id) {
+                $taskId = $resp.task.id
+                $rawCommand = $resp.task.command
+                $rawCommand = $rawCommand -replace '^\s*@@SCRIPTTYPE:\w+@@\s*', ''
+                $scriptType = if ($resp.task.scriptType -and $resp.task.scriptType -ne 'auto') { $resp.task.scriptType } else { Detect-ScriptType $rawCommand }
+                Write-Log "Executando tarefa $taskId (tipo: $scriptType)"
+                try {
+                    $output = Execute-ScriptContent $rawCommand $scriptType $taskId
+                    $reportBody = @{ output = $output } | ConvertTo-Json -Depth 3
+                    Invoke-ApiRequest -Endpoint "/report/$taskId" -Method "POST" -Body $reportBody -TimeoutSec 30
+                    Write-Log "Tarefa $taskId concluida"
+                } catch {
+                    $errBody = @{ error = "[$scriptType] $($_.Exception.Message)" } | ConvertTo-Json
+                    Invoke-ApiRequest -Endpoint "/report/$taskId" -Method "POST" -Body $errBody -TimeoutSec 15
+                    Write-Log "Erro na tarefa $taskId : $($_.Exception.Message)"
+                }
+                $processed++
+            } else {
+                break
             }
+        } catch {
+            Write-Log "Erro ao buscar tarefas: $($_.Exception.Message)"
+            break
         }
-    } catch {
-        Write-Log "Erro ao buscar tarefas: $($_.Exception.Message)"
     }
 }
 

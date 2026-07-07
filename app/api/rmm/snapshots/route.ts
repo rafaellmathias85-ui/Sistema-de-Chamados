@@ -27,19 +27,23 @@ export async function POST(req: NextRequest) {
 
     if (!machine) return NextResponse.json({ error: 'Máquina não encontrada' }, { status: 404 });
 
+    // Agent may send JSON fields already serialized as strings (ConvertTo-Json -Compress).
+    // Only stringify if the value is not already a string to avoid double-encoding.
+    const toJson = (v: any) => v == null ? null : typeof v === 'string' ? v : JSON.stringify(v);
+
     const snapshot = await prisma.machineSnapshot.create({
       data: {
         machineId: machine.id,
         cpuPercent: snapshotData.cpuPercent,
         memoryPercent: snapshotData.memoryPercent,
         memoryUsedBytes: snapshotData.memoryUsedBytes ? BigInt(snapshotData.memoryUsedBytes) : null,
-        diskUsageJson: snapshotData.diskUsageJson ? JSON.stringify(snapshotData.diskUsageJson) : null,
-        processesJson: snapshotData.processesJson ? JSON.stringify(snapshotData.processesJson) : null,
-        servicesJson: snapshotData.servicesJson ? JSON.stringify(snapshotData.servicesJson) : null,
-        installedAppsJson: snapshotData.installedAppsJson ? JSON.stringify(snapshotData.installedAppsJson) : null,
-        startupAppsJson: snapshotData.startupAppsJson ? JSON.stringify(snapshotData.startupAppsJson) : null,
-        gpuJson: snapshotData.gpuJson ? JSON.stringify(snapshotData.gpuJson) : null,
-        networkIoJson: snapshotData.networkIoJson ? JSON.stringify(snapshotData.networkIoJson) : null,
+        diskUsageJson: toJson(snapshotData.diskUsageJson),
+        processesJson: toJson(snapshotData.processesJson),
+        servicesJson: toJson(snapshotData.servicesJson),
+        installedAppsJson: toJson(snapshotData.installedAppsJson),
+        startupAppsJson: toJson(snapshotData.startupAppsJson),
+        gpuJson: toJson(snapshotData.gpuJson),
+        networkIoJson: toJson(snapshotData.networkIoJson),
       },
     });
 
