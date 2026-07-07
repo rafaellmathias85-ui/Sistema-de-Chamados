@@ -14,6 +14,7 @@ $ErrorActionPreference = "SilentlyContinue"
 $script:WebFilterCache = @{}
 $script:CacheExpiry = (Get-Date)
 $script:SqliteToolPath = $null
+$script:DohMarker = "HKLM:\SOFTWARE\WinnerRMM\WebFilter"
 
 # ============ SQLITE3.EXE TOOL ============
 
@@ -554,6 +555,43 @@ function Send-WebFilterLogs {
     }
 }
 
+# ============ DNS-OVER-HTTPS POLICY ============
+
+function Set-BrowserDohPolicy {
+    param([bool]$Disable)
+    # Registry-based group policy paths: Chrome, Edge, Brave
+    $browserPolicies = @(
+        "HKLM:\SOFTWARE\Policies\Google\Chrome",
+        "HKLM:\SOFTWARE\Policies\Microsoft\Edge",
+        "HKLM:\SOFTWARE\Policies\BraveSoftware\Brave"
+    )
+    foreach ($path in $browserPolicies) {
+        try {
+            if ($Disable) {
+                if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+                Set-ItemProperty -Path $path -Name "DnsOverHttpsMode" -Value "off" -ErrorAction Stop
+            } else {
+                if (Test-Path $path) {
+                    Remove-ItemProperty -Path $path -Name "DnsOverHttpsMode" -ErrorAction SilentlyContinue
+                }
+            }
+        } catch {
+            Write-Log "[WebFilter] DoH policy failed for ${path}: $($_.Exception.Message)"
+        }
+    }
+    # Track that we applied this so we only revert what we set
+    try {
+        if (-not (Test-Path $script:DohMarker)) { New-Item -Path $script:DohMarker -Force | Out-Null }
+        Set-ItemProperty -Path $script:DohMarker -Name "DohPolicyApplied" -Value ([int]$Disable) -ErrorAction SilentlyContinue
+    } catch {}
+    $state = if ($Disable) { "DISABLED (mode=off)" } else { "RESTORED (removed)" }
+    Write-Log "[WebFilter] Browser DoH policy $state for Chrome/Edge/Brave"
+}
+
+function Get-DohMarkerApplied {
+    try { return (Get-ItemProperty -Path $script:DohMarker -Name "DohPolicyApplied" -ErrorAction SilentlyContinue).DohPolicyApplied } catch { return $null }
+}
+
 # ============ ENFORCEMENT VIA HOSTS FILE ============
 
 function Enforce-WebFilterPolicies {
@@ -687,6 +725,15 @@ function Enforce-WebFilterPolicies {
             & ipconfig /flushdns 2>$null | Out-Null
         } catch {}
 
+        # 6. DoH policy: desabilitar quando ha dominios bloqueados; restaurar quando filtro esta limpo
+        if ($blockedDomains.Count -gt 0) {
+            Set-BrowserDohPolicy -Disable $true
+        } else {
+            if ((Get-DohMarkerApplied) -eq 1) {
+                Set-BrowserDohPolicy -Disable $false
+            }
+        }
+
         $addedCount = $blockedDomains.Count
         Write-Log "[WebFilter-Enforce] Hosts file updated: $addedCount domains blocked"
 
@@ -723,6 +770,11 @@ function Remove-WebFilterHostsEntries {
         [System.IO.File]::WriteAllText($HostsPath, ($newLines -join "`r`n"), [System.Text.Encoding]::UTF8)
         Write-Log "[WebFilter-Enforce] Cleaned hosts file (removed Winner WebFilter entries)"
         try { & ipconfig /flushdns 2>$null | Out-Null } catch {}
+    }
+
+    # Reverter DoH apenas se foi nos que desabilitamos
+    if ((Get-DohMarkerApplied) -eq 1) {
+        Set-BrowserDohPolicy -Disable $false
     }
 }
 
