@@ -118,6 +118,9 @@ export async function GET(
       margin: { top: '20mm', bottom: '20mm', left: '18mm', right: '18mm' },
       printBackground: true,
     });
+    if (!pdfBuffer) {
+      return NextResponse.json({ error: 'Falha ao gerar PDF' }, { status: 500 });
+    }
     return new NextResponse(pdfBuffer, {
       headers: {
         'Content-Type': 'application/pdf',

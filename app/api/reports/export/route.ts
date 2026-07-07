@@ -505,6 +505,12 @@ async function exportPDF(headers: string[], data: (string | number | null)[][], 
       margin: { top: '15mm', right: '10mm', bottom: '15mm', left: '10mm' },
       printBackground: true,
     });
+    if (!pdfBuffer) {
+      return NextResponse.json(
+        { error: 'Erro ao gerar PDF. Tente exportar em CSV ou Excel.' },
+        { status: 500 }
+      );
+    }
     return new NextResponse(pdfBuffer, {
       headers: {
         'Content-Type': 'application/pdf',
