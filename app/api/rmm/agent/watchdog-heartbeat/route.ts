@@ -18,6 +18,9 @@ export async function POST(request: NextRequest) {
       agent_version,
       watchdog_action,
       timestamp,
+      // V4 fields
+      hung,
+      heartbeat_age_sec,
     } = body;
 
     if (!token || !hostname) {
@@ -58,6 +61,8 @@ export async function POST(request: NextRequest) {
       agentExists: agent_exists,
       agentVersion: agent_version,
       lastAction: watchdog_action,
+      hung: hung ?? false,
+      heartbeatAgeSec: heartbeat_age_sec ?? null,
     });
 
     // Atualizar agentVersion se fornecido e o campo existir no schema
@@ -77,6 +82,9 @@ export async function POST(request: NextRequest) {
     // Log watchdog action se não for healthy (para alertas)
     if (watchdog_action && watchdog_action !== 'healthy' && watchdog_action !== 'none') {
       console.log(`[Watchdog] ${hostname} (${company.name}): ${watchdog_action}`);
+    }
+    if (hung) {
+      console.warn(`[Watchdog] ${hostname} (${company.name}): AGENT HUNG (heartbeat_age=${heartbeat_age_sec}s)`);
     }
 
     return NextResponse.json({ ok: true });
