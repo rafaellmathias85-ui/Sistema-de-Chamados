@@ -268,6 +268,7 @@ export default function MachineDetailPage() {
 
   const getStatusIcon = (s: string) => {
     if (s === 'PENDING') return <Loader2 size={14} className="animate-spin text-yellow-400" />;
+    if (s === 'RUNNING') return <Loader2 size={14} className="animate-spin text-blue-400" />;
     if (s === 'EXECUTED') return <CheckCircle2 size={14} className="text-green-400" />;
     if (s === 'CANCELLED') return <Ban size={14} className="text-orange-400" />;
     return <XCircle size={14} className="text-red-400" />;
@@ -275,6 +276,7 @@ export default function MachineDetailPage() {
 
   const getStatusLabel = (s: string) => {
     if (s === 'PENDING') return 'Pendente';
+    if (s === 'RUNNING') return 'Executando';
     if (s === 'EXECUTED') return 'Executado';
     if (s === 'CANCELLED') return 'Cancelado';
     return 'Erro';
@@ -674,12 +676,12 @@ export default function MachineDetailPage() {
                       task.status === 'CANCELLED' ? 'bg-orange-500/20 text-orange-400' :
                       'bg-red-500/20 text-red-400'
                     }`}>{getStatusLabel(task.status)}</span>
-                    {task.status === 'PENDING' && (
+                    {(task.status === 'PENDING' || task.status === 'RUNNING') && (
                       <button
                         onClick={() => handleCancelTask(task.id)}
                         disabled={cancelling === task.id}
                         className="ml-2 text-xs px-2 py-0.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 transition flex items-center gap-1 disabled:opacity-50"
-                        title="Cancelar tarefa pendente"
+                        title="Cancelar tarefa"
                       >
                         {cancelling === task.id ? <Loader2 size={10} className="animate-spin" /> : <Ban size={10} />}
                         Cancelar
@@ -689,9 +691,9 @@ export default function MachineDetailPage() {
                   <div className="text-cyan-400 mb-1">
                     {(() => {
                       const typeLabels: Record<string, string> = { powershell: 'PS', cmd: 'CMD', vbscript: 'VBS', python: 'PY', auto: 'AUTO' };
-                      // Strip legacy @@SCRIPTTYPE@@ prefix if present
-                      const m = task.command.match(/^@@SCRIPTTYPE:(\w+)@@([\s\S]*)/);
-                      const displayCmd = m ? m[2] : task.command;
+                      const cmd = task.command ?? '';
+                      const m = cmd.match(/^@@SCRIPTTYPE:(\w+)@@([\s\S]*)/);
+                      const displayCmd = m ? m[2] : cmd;
                       const sType = (task as any).scriptType || (m ? m[1] : 'auto');
                       const label = typeLabels[sType] || sType?.toUpperCase() || 'AUTO';
                       return <><span className="tm-text-muted text-xs mr-1">[{label}]</span>$ {displayCmd}</>;

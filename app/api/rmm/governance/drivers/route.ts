@@ -22,6 +22,12 @@ export async function POST(request: NextRequest) {
     });
     if (!machine) return NextResponse.json({ error: 'Máquina não encontrada' }, { status: 404 });
 
+    const parseDate = (s: any): Date | null => {
+      if (!s) return null;
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    };
+
     // Upsert cada driver (evita duplicatas)
     let upserted = 0;
     for (const d of drivers.slice(0, 500)) {
@@ -39,7 +45,7 @@ export async function POST(request: NextRequest) {
         update: {
           driverName: d.driver_name || infName,
           provider: d.provider || null,
-          driverDate: d.driver_date ? new Date(d.driver_date) : null,
+          driverDate: parseDate(d.driver_date),
           deviceName: d.device_name || null,
           deviceClass: d.device_class || null,
           isSigned: d.is_signed ?? null,
@@ -52,7 +58,7 @@ export async function POST(request: NextRequest) {
           driverName: d.driver_name || infName,
           driverVersion,
           provider: d.provider || null,
-          driverDate: d.driver_date ? new Date(d.driver_date) : null,
+          driverDate: parseDate(d.driver_date),
           deviceName: d.device_name || null,
           deviceClass: d.device_class || null,
           infName,

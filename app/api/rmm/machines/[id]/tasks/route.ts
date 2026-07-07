@@ -29,8 +29,8 @@ export async function PATCH(
     if (task.machineId !== params.id) {
       return NextResponse.json({ error: 'Tarefa não pertence a esta máquina' }, { status: 400 });
     }
-    if (task.status !== 'PENDING') {
-      return NextResponse.json({ error: 'Apenas tarefas pendentes podem ser canceladas' }, { status: 400 });
+    if (!['PENDING', 'RUNNING'].includes(task.status)) {
+      return NextResponse.json({ error: 'Apenas tarefas pendentes ou em execução podem ser canceladas' }, { status: 400 });
     }
 
     const updated = await prisma.rmmTask.update({
@@ -43,7 +43,7 @@ export async function PATCH(
     });
 
     // Also cancel corresponding exec log if exists
-    const execMatch = task.command.match(/EXEC_SCRIPT:[^:]+:[^:]+:(\w+)/);
+    const execMatch = (task.command ?? '').match(/EXEC_SCRIPT:[^:]+:[^:]+:(\w+)/);
     if (execMatch) {
       await prisma.rmmExecLog.updateMany({
         where: { id: execMatch[1], status: 'PENDING' },
