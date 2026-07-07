@@ -4,6 +4,11 @@ dotenv.config();
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.NODE_ENV === 'production' || process.env.DATABASE_URL?.includes('winner_helpdesk')) {
+    console.error('[purge-tickets] BLOQUEADO: execução em produção não permitida. Defina NODE_ENV=development explicitamente.');
+    process.exit(1);
+  }
+
   console.log('[purge-tickets] Iniciando purga completa de tickets...');
 
   const pre = {

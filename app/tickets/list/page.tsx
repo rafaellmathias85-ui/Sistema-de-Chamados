@@ -61,6 +61,7 @@ export default function TicketListPage() {
   const [slaViolated, setSlaViolated] = useState(false);
   const [hideClosed, setHideClosed] = useState(false);
   const [reopenedOnly, setReopenedOnly] = useState(false);
+  const [hideVisitaTecnica, setHideVisitaTecnica] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalPages, setTotalPages] = useState(1);
@@ -136,7 +137,7 @@ export default function TicketListPage() {
   useEffect(() => {
     fetchTickets();
     fetchStatusCounts();
-  }, [page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed, reopenedOnly]);
+  }, [page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed, reopenedOnly, hideVisitaTecnica]);
 
   // Auto-refresh a cada 1 min (para manter lista sempre atualizada)
   useEffect(() => {
@@ -146,7 +147,7 @@ export default function TicketListPage() {
       fetchStatusCounts();
     }, 60000); // 1 min
     return () => clearInterval(interval);
-  }, [autoRefresh, page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed, reopenedOnly]);
+  }, [autoRefresh, page, pageSize, statusFilter, priorityFilter, assigneeFilter, onlyMyTickets, slaViolated, hideClosed, reopenedOnly, hideVisitaTecnica]);
 
   const fetchTickets = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -163,6 +164,7 @@ export default function TicketListPage() {
       if (slaViolated) params.append('slaViolated', 'true');
       if (hideClosed) params.append('hideClosed', 'true');
       if (reopenedOnly) params.append('reopened', 'true');
+      if (hideVisitaTecnica) params.append('hideVisitaTecnica', 'true');
 
       const res = await fetch(`/api/tickets?${params}`, { cache: 'no-store' });
       if (res.ok) {
@@ -244,6 +246,7 @@ export default function TicketListPage() {
       IN_PARTNER: 'bg-indigo-500/20 text-indigo-400',
       PAUSED: 'bg-orange-500/20 text-orange-400',
       AWAITING_CLIENT: 'bg-cyan-500/20 text-cyan-400',
+      READY_FOR_DELIVERY: 'bg-teal-500/20 text-teal-400',
       RESOLVED: 'bg-green-500/20 text-green-400',
       CLOSED: 'bg-gray-500/20 tm-text-secondary',
     };
@@ -253,6 +256,7 @@ export default function TicketListPage() {
       IN_PARTNER: 'Com Parceiro',
       PAUSED: 'Pausado',
       AWAITING_CLIENT: 'Aguardando Cliente',
+      READY_FOR_DELIVERY: 'Pronto para Entrega',
       RESOLVED: 'Resolvido',
       CLOSED: 'Fechado',
     };
@@ -383,6 +387,7 @@ export default function TicketListPage() {
                 <option value="IN_PARTNER">Com Parceiro</option>
                 <option value="PAUSED">Pausado</option>
                 <option value="AWAITING_CLIENT">Aguardando Cliente</option>
+                <option value="READY_FOR_DELIVERY">Pronto para Entrega</option>
                 <option value="RESOLVED">Resolvido</option>
                 <option value="CLOSED">Fechado</option>
               </select>
@@ -473,6 +478,18 @@ export default function TicketListPage() {
                   <span className="text-sm tm-text flex items-center gap-1">
                     <RotateCcw size={16} className="text-yellow-400" />
                     Reabertos sem resposta
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={hideVisitaTecnica}
+                    onChange={(e) => { setHideVisitaTecnica(e.target.checked); setPage(1); }}
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                  />
+                  <span className="text-sm tm-text flex items-center gap-1">
+                    <EyeOff size={16} className="text-blue-400" />
+                    Ocultar Visita Técnica
                   </span>
                 </label>
               </div>

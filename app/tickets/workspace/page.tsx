@@ -95,11 +95,13 @@ interface TicketDetail {
 const statusLabels: Record<string, string> = {
   OPEN: 'Aberto', IN_PROGRESS: 'Em Andamento', IN_PARTNER: 'Parceiro',
   PAUSED: 'Pausado', AWAITING_CLIENT: 'Aguard. Cliente',
+  READY_FOR_DELIVERY: 'Pronto p/ Entrega',
   RESOLVED: 'Resolvido', CLOSED: 'Fechado',
 };
 const statusColors: Record<string, string> = {
   OPEN: 'bg-blue-500', IN_PROGRESS: 'bg-cyan-500', IN_PARTNER: 'bg-purple-500',
   PAUSED: 'bg-gray-400', AWAITING_CLIENT: 'bg-yellow-500',
+  READY_FOR_DELIVERY: 'bg-teal-500',
   RESOLVED: 'bg-green-500', CLOSED: 'bg-gray-500',
 };
 const priorityLabels: Record<string, string> = { LOW: 'Baixa', MEDIUM: 'Média', HIGH: 'Alta', CRITICAL: 'Crítica' };

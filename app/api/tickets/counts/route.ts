@@ -14,7 +14,7 @@ export async function GET() {
       where.creatorId = session.user.id;
     }
 
-    const statuses = ['OPEN', 'IN_PROGRESS', 'PAUSED', 'AWAITING_CLIENT', 'IN_PARTNER', 'RESOLVED', 'CLOSED'];
+    const statuses = ['OPEN', 'IN_PROGRESS', 'PAUSED', 'AWAITING_CLIENT', 'IN_PARTNER', 'READY_FOR_DELIVERY', 'RESOLVED', 'CLOSED'];
     const counts: Record<string, number> = {};
     await Promise.all(
       statuses.map(async (s) => {

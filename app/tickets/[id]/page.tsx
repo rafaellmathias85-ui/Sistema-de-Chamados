@@ -449,6 +449,7 @@ export default function TicketDetailPage() {
       IN_PARTNER: 'bg-violet-500/20 text-violet-400 border-violet-500/30',
       PAUSED: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
       AWAITING_CLIENT: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+      READY_FOR_DELIVERY: 'bg-teal-500/20 text-teal-400 border-teal-500/30',
       RESOLVED: 'bg-green-500/20 text-green-400 border-green-500/30',
       CLOSED: 'bg-gray-500/20 tm-text-secondary border-gray-500/30',
     };
@@ -458,6 +459,7 @@ export default function TicketDetailPage() {
       IN_PARTNER: 'Parceiro',
       PAUSED: 'Pausado',
       AWAITING_CLIENT: 'Aguardando Cliente',
+      READY_FOR_DELIVERY: 'Pronto para Entrega',
       RESOLVED: 'Resolvido',
       CLOSED: 'Fechado',
     };
@@ -880,6 +882,7 @@ export default function TicketDetailPage() {
                   <option value="IN_PARTNER">Parceiro</option>
                   <option value="PAUSED">Pausado</option>
                   <option value="AWAITING_CLIENT">Aguardando Cliente</option>
+                  <option value="READY_FOR_DELIVERY">Pronto para Entrega</option>
                   <option value="RESOLVED">Resolvido</option>
                 </select>
               </div>

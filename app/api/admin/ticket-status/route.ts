@@ -11,6 +11,7 @@ const DEFAULT_STATUSES = [
   { key: 'IN_PARTNER', label: 'Parceiro', color: '#a855f7', enabled: true },
   { key: 'PAUSED', label: 'Pausado', color: '#f59e0b', enabled: true },
   { key: 'AWAITING_CLIENT', label: 'Aguardando Cliente', color: '#f97316', enabled: true },
+  { key: 'READY_FOR_DELIVERY', label: 'Pronto para Entrega', color: '#10b981', enabled: true },
   { key: 'RESOLVED', label: 'Resolvido', color: '#06b6d4', enabled: true },
   { key: 'CLOSED', label: 'Fechado', color: '#6b7280', enabled: true },
 ];

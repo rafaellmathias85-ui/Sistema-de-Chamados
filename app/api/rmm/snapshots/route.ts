@@ -86,12 +86,15 @@ export async function GET(req: NextRequest) {
 
     if (!machineId) return NextResponse.json({ error: 'machineId obrigatório' }, { status: 400 });
 
+    const serializeSnapshot = (s: any) =>
+      s ? { ...s, memoryUsedBytes: s.memoryUsedBytes != null ? s.memoryUsedBytes.toString() : null } : s;
+
     if (latest === 'true') {
       const snapshot = await prisma.machineSnapshot.findFirst({
         where: { machineId },
         orderBy: { createdAt: 'desc' },
       });
-      return NextResponse.json(snapshot);
+      return NextResponse.json(serializeSnapshot(snapshot));
     }
 
     const snapshots = await prisma.machineSnapshot.findMany({
@@ -100,7 +103,7 @@ export async function GET(req: NextRequest) {
       take: 50,
     });
 
-    return NextResponse.json(snapshots);
+    return NextResponse.json(snapshots.map(serializeSnapshot));
   } catch (error) {
     console.error('Erro ao buscar snapshots:', error);
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 });

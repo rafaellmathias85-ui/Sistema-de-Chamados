@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
     const slaViolated = searchParams.get('slaViolated') === 'true';
     const hideClosed = searchParams.get('hideClosed') === 'true';
     const reopened = searchParams.get('reopened') === 'true';
+    const hideVisitaTecnica = searchParams.get('hideVisitaTecnica') === 'true';
     const sort = searchParams.get('sort');
     const order = searchParams.get('order');
 
@@ -83,7 +84,19 @@ export async function GET(request: NextRequest) {
       where.reopenedFlag = true;
     }
     if (hideClosed) {
-      where.status = { ...(where.status || {}), notIn: ['CLOSED', 'RESOLVED'] };
+      if (!where.status) {
+        where.status = { notIn: ['CLOSED', 'RESOLVED'] };
+      } else if (typeof where.status === 'object') {
+        where.status = { ...where.status, notIn: ['CLOSED', 'RESOLVED'] };
+      }
+      // se status é string (filtro exato selecionado), não sobrescreve — filtro do usuário prevalece
+    }
+
+    if (hideVisitaTecnica) {
+      where.NOT = [
+        ...(Array.isArray(where.NOT) ? where.NOT : where.NOT ? [where.NOT] : []),
+        { subject: { contains: 'visita técnica', mode: 'insensitive' } },
+      ];
     }
 
     // Busca expandida: número, assunto, descrição, domínio da empresa, email do cliente

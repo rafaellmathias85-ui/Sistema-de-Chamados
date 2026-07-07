@@ -13,29 +13,30 @@ export async function GET() {
     }
 
     const [
-      endpointsMonitored,
+      [endpointsMonitoredRaw],
       usbEvents,
-      usbMonitoredMachines,
-      webMonitoredMachines,
+      [usbMonitoredRaw],
+      [webMonitoredRaw],
       drivers,
       relayDiscovered,
       agentVersions,
       auditLogs,
       totalMachines,
     ] = await Promise.all([
-      // Contar máquinas únicas com sessões de atividade (não total de sessões)
-      prisma.endpointActivitySession.groupBy({ by: ['machineId'] }).then(g => g.length),
+      prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(DISTINCT "machineId") AS count FROM "EndpointActivitySession"`,
       prisma.usbEvent.count(),
-      // Contar máquinas distintas com eventos USB
-      prisma.usbEvent.groupBy({ by: ['machineId'] }).then(g => g.length),
-      // Contar máquinas distintas com webActivity (não URLs individuais)
-      prisma.webActivity.groupBy({ by: ['machineId'] }).then(g => g.length),
+      prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(DISTINCT "machineId") AS count FROM "UsbEvent"`,
+      prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(DISTINCT "machineId") AS count FROM "WebActivity"`,
       prisma.driverInventory.count(),
       prisma.relayDiscoveredMachine.count(),
       prisma.agentVersion.count(),
       prisma.governanceAuditLog.count(),
       prisma.rmmMachine.count(),
     ]);
+
+    const endpointsMonitored = Number(endpointsMonitoredRaw?.count ?? 0);
+    const usbMonitoredMachines = Number(usbMonitoredRaw?.count ?? 0);
+    const webMonitoredMachines = Number(webMonitoredRaw?.count ?? 0);
 
     return NextResponse.json({
       endpointsMonitored,

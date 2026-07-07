@@ -51,6 +51,7 @@ const statusLabels: Record<string, string> = {
   IN_PARTNER: 'Parceiro',
   PAUSED: 'Pausado',
   AWAITING_CLIENT: 'Aguard. Cliente',
+  READY_FOR_DELIVERY: 'Pronto p/ Entrega',
   RESOLVED: 'Resolvido',
   CLOSED: 'Fechado',
 };
@@ -61,6 +62,7 @@ const statusColors: Record<string, string> = {
   IN_PARTNER: 'bg-purple-500',
   PAUSED: 'bg-gray-400',
   AWAITING_CLIENT: 'bg-yellow-500',
+  READY_FOR_DELIVERY: 'bg-teal-500',
   RESOLVED: 'bg-green-500',
   CLOSED: 'bg-gray-500',
 };
