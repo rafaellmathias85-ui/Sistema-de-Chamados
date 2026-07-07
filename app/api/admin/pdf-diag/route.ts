@@ -26,7 +26,6 @@ export async function GET(req: NextRequest) {
     try { checked[p] = fs.existsSync(p); } catch { checked[p] = false; }
   }
 
-  // Scan puppeteer cache dirs
   const homes = ['/home/ubuntu', '/root', process.env.HOME].filter(Boolean) as string[];
   const cacheFinds: string[] = [];
   for (const home of homes) {
@@ -48,6 +47,30 @@ export async function GET(req: NextRequest) {
     puppeteerExecPath = puppeteer.executablePath();
   } catch {}
 
+  // ---- Tenta lançar o browser de verdade e captura o erro ----
+  let launchResult: { ok: boolean; path: string; error?: string } = { ok: false, path: '' };
+  const chromePath =
+    (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)
+      ? process.env.PUPPETEER_EXECUTABLE_PATH
+      : cacheFinds[0] ?? puppeteerExecPath ?? '');
+
+  if (chromePath) {
+    try {
+      const puppeteer = (await import('puppeteer')).default;
+      const browser = await puppeteer.launch({
+        executablePath: chromePath,
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-zygote'],
+      });
+      await browser.close();
+      launchResult = { ok: true, path: chromePath };
+    } catch (e: any) {
+      launchResult = { ok: false, path: chromePath, error: e?.message || String(e) };
+    }
+  } else {
+    launchResult = { ok: false, path: '', error: 'Nenhum Chrome encontrado' };
+  }
+
   return NextResponse.json({
     env: {
       HOME: process.env.HOME,
@@ -59,5 +82,6 @@ export async function GET(req: NextRequest) {
     puppeteerExecPath,
     puppeteerExecPathExists: puppeteerExecPath ? fs.existsSync(puppeteerExecPath) : false,
     cacheFinds,
+    launchTest: launchResult,
   });
 }
