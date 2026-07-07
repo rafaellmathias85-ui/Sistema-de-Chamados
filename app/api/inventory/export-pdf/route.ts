@@ -135,6 +135,9 @@ export async function GET(request: NextRequest) {
       margin: { top: '15mm', bottom: '15mm', left: '10mm', right: '10mm' },
       printBackground: true,
     });
+    if (!pdfBuffer) {
+      return NextResponse.json({ error: 'Falha ao gerar PDF' }, { status: 500 });
+    }
     return new NextResponse(pdfBuffer, {
       headers: {
         'Content-Type': 'application/pdf',
