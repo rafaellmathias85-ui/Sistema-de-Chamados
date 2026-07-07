@@ -4,12 +4,19 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/session';
 
-// GET /api/rmm/governance/stats — Stats consolidadas de governance (single query)
+let statsCache: { data: object; expiresAt: number } | null = null;
+const STATS_CACHE_TTL = 60_000;
+
+// GET /api/rmm/governance/stats — Stats consolidadas de governance
 export async function GET() {
   try {
     const session = await getSession();
     if (!session?.user || !['ADMIN', 'SUPPORT'].includes(session.user.role)) {
-      return NextResponse.json({ error: 'N\u00e3o autorizado' }, { status: 401 });
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+
+    if (statsCache && Date.now() < statsCache.expiresAt) {
+      return NextResponse.json(statsCache.data);
     }
 
     const [
@@ -38,7 +45,7 @@ export async function GET() {
     const usbMonitoredMachines = Number(usbMonitoredRaw?.count ?? 0);
     const webMonitoredMachines = Number(webMonitoredRaw?.count ?? 0);
 
-    return NextResponse.json({
+    const data = {
       endpointsMonitored,
       usbEvents,
       usbMonitoredMachines,
@@ -50,7 +57,11 @@ export async function GET() {
       totalMachines,
       usbBlocked: 0,
       webBlocked: 0,
-    });
+    };
+
+    statsCache = { data, expiresAt: Date.now() + STATS_CACHE_TTL };
+
+    return NextResponse.json(data);
   } catch (error) {
     console.error('Governance stats error:', error);
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
