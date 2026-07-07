@@ -1,0 +1,4 @@
+# Preserve exact bytes for signed PowerShell files (Authenticode signature breaks on CRLF conversion)
+public/rmm/v4/*.ps1 binary
+public/rmm/migration/*.ps1 binary
+public/rmm/*.ps1 binary
