@@ -206,6 +206,36 @@ export default function AgentGeneratorPage() {
             3. Baixar Arquivos
           </h2>
 
+          {/* Instalador V4 — SIGNED */}
+          <a
+            href="/rmm/v4/Instalar_RMM_Winner_V4.ps1"
+            download="Instalar_RMM_Winner_V4.ps1"
+            className="w-full flex items-center gap-4 p-5 mb-3 bg-emerald-500/10 border-2 border-emerald-500/40 rounded-xl hover:bg-emerald-500/20 hover:border-emerald-500/60 transition"
+          >
+            <div className="p-3 bg-emerald-500/20 rounded-lg">
+              <Shield size={28} className="text-emerald-400" />
+            </div>
+            <div className="text-left flex-1">
+              <span className="tm-text font-semibold text-lg block flex items-center gap-2">
+                🆕 Instalador V4 <span className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-normal">ASSINADO · Authenticode</span>
+              </span>
+              <span className="tm-text-secondary text-sm">Watchdog hang-aware + config DPAPI + auto-update via manifest · Requer -CompanyToken</span>
+              <span className="text-emerald-400 text-xs block mt-1">Instalar_RMM_Winner_V4.ps1 · Execute com o token abaixo</span>
+            </div>
+          </a>
+
+          {/* Comando V4 com token */}
+          {tokenInfo?.token && (
+            <div className="mb-4 p-3 bg-black/40 border border-emerald-500/20 rounded-lg">
+              <p className="text-xs text-emerald-400 mb-1 font-medium">Comando de instalação V4 (PowerShell como Admin):</p>
+              <code className="text-xs text-green-300 font-mono break-all">
+                {`.\\ Instalar_RMM_Winner_V4.ps1 -CompanyToken "${tokenInfo.token}" -ApiUrl "https://wticorp.com.br/api/rmm"`}
+              </code>
+            </div>
+          )}
+
+          <div className="border-t tm-border my-4" />
+
           {/* Instalador principal V3 */}
           <button
             onClick={() => handleDownload('installer')}

@@ -171,17 +171,16 @@ echo "[Deploy] ✅ $UPLOADS_PATH ($(du -sh $UPLOADS_PATH 2>/dev/null | cut -f1))
 # ============================================================
 echo ""
 echo "[Deploy] === DEPENDÊNCIAS DO CHROME ==="
-if ! dpkg -l libatk1.0-0 >/dev/null 2>&1; then
-  echo "[Deploy] Instalando dependências do Chrome/Puppeteer..."
-  sudo apt-get install -y \
-    libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
-    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
-    libxrandr2 libgbm1 libasound2 libpango-1.0-0 \
-    libcairo2 libnss3 libnspr4 libxss1 libxtst6 2>/dev/null
-  echo "[Deploy] ✅ Dependências do Chrome instaladas"
-else
-  echo "[Deploy] ✅ Dependências do Chrome já presentes"
-fi
+echo "[Deploy] Garantindo dependências do Chrome/Puppeteer (idempotente)..."
+sudo apt-get update -qq 2>/dev/null || true
+sudo apt-get install -y --no-install-recommends \
+  libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+  libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+  libxrandr2 libgbm1 libpango-1.0-0 \
+  libcairo2 libnss3 libnspr4 libxss1 libxtst6 2>/dev/null || true
+# libasound2 foi renomeado para libasound2t64 no Ubuntu 24
+sudo apt-get install -y libasound2 2>/dev/null || sudo apt-get install -y libasound2t64 2>/dev/null || true
+echo "[Deploy] ✅ Dependências do Chrome verificadas"
 
 # Certificado de assinatura do agente RMM (não web-acessível)
 CERTS_DIR="/var/www/helpdesk/certs"
