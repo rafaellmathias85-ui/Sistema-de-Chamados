@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
 
       const ticket = await prisma.ticket.create({
         data: {
-          subject: 'Visita Técnica',
+          subject: `Visita Técnica — ${dateStr} às ${startTime}`,
           description: `Visita técnica agendada para ${dateStr} das ${startTime} às ${endTime}.${requesterName ? `\nSolicitante: ${requesterName}` : ''}${requesterEmail ? ` (${requesterEmail})` : ''}${observation ? `\nObservação: ${observation}` : ''}`,
           status: 'OPEN',
           priority: 'MEDIUM',
