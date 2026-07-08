@@ -206,31 +206,32 @@ export default function AgentGeneratorPage() {
             3. Baixar Arquivos
           </h2>
 
-          {/* Instalador V4 — SIGNED */}
-          <a
-            href="/rmm/v4/Instalar_RMM_Winner_V4.ps1"
-            download="Instalar_RMM_Winner_V4.ps1"
-            className="w-full flex items-center gap-4 p-5 mb-3 bg-emerald-500/10 border-2 border-emerald-500/40 rounded-xl hover:bg-emerald-500/20 hover:border-emerald-500/60 transition"
+          {/* Instalador V4 — SIGNED, token no nome do arquivo */}
+          <button
+            onClick={() => handleDownload('installer_v4')}
+            disabled={generating}
+            className="w-full flex items-center gap-4 p-5 mb-3 bg-emerald-500/10 border-2 border-emerald-500/40 rounded-xl hover:bg-emerald-500/20 hover:border-emerald-500/60 transition disabled:opacity-50"
           >
             <div className="p-3 bg-emerald-500/20 rounded-lg">
               <Shield size={28} className="text-emerald-400" />
             </div>
             <div className="text-left flex-1">
               <span className="tm-text font-semibold text-lg block flex items-center gap-2">
-                🆕 Instalador V4 <span className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-normal">ASSINADO · Authenticode</span>
+                🆕 Instalador V4 <span className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-normal">ASSINADO · TOKEN NO ARQUIVO</span>
               </span>
-              <span className="tm-text-secondary text-sm">Watchdog hang-aware + config DPAPI + auto-update via manifest · Requer -CompanyToken</span>
-              <span className="text-emerald-400 text-xs block mt-1">Instalar_RMM_Winner_V4.ps1 · Execute com o token abaixo</span>
+              <span className="tm-text-secondary text-sm">Arquivo único p/ GPO e Intune: token embutido no nome do arquivo (assinatura Authenticode preservada) + auto-download do agente/watchdog com verificação SHA-256</span>
+              <span className="text-emerald-400 text-xs block mt-1">Instalar_RMM_Winner_V4_&lt;Empresa&gt;_TK&lt;token&gt;.ps1 · ⚠ NÃO renomeie o arquivo</span>
             </div>
-          </a>
+          </button>
 
-          {/* Comando V4 com token */}
+          {/* Comando V4 (token já vai no nome do arquivo) */}
           {tokenInfo?.token && (
             <div className="mb-4 p-3 bg-black/40 border border-emerald-500/20 rounded-lg">
-              <p className="text-xs text-emerald-400 mb-1 font-medium">Comando de instalação V4 (PowerShell como Admin):</p>
+              <p className="text-xs text-emerald-400 mb-1 font-medium">Comando de instalação V4 (PowerShell como Admin — o token é lido do nome do arquivo):</p>
               <code className="text-xs text-green-300 font-mono break-all">
-                {`Set-ExecutionPolicy Bypass -Scope Process -Force; .\\Instalar_RMM_Winner_V4.ps1 -CompanyToken "${tokenInfo.token}" -ApiUrl "https://wticorp.com.br/api/rmm"`}
+                {`Set-ExecutionPolicy Bypass -Scope Process -Force; .\\Instalar_RMM_Winner_V4_*_TK*.ps1`}
               </code>
+              <p className="text-xs tm-text-muted mt-2">Alternativa (arquivo genérico assinado, sem token no nome): <code className="text-green-300">.\Instalar_RMM_Winner_V4.ps1 -CompanyToken &quot;{tokenInfo.token.substring(0, 12)}...&quot;</code></p>
             </div>
           )}
 
@@ -322,20 +323,20 @@ export default function AgentGeneratorPage() {
             <div>
               <h4 className="tm-text font-medium mb-1">📦 Instalação Manual (1 máquina)</h4>
               <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
-                <li>Selecione a empresa acima e copie o <strong>Comando de instalação V4</strong></li>
-                <li>Na máquina alvo, abra o <strong>PowerShell como Administrador</strong></li>
-                <li>Cole e execute o comando — o instalador configura o serviço, watchdog e certificado automaticamente</li>
-                <li>Verifique em <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">services.msc</code> que <strong>WinnerRMM</strong> está rodando</li>
+                <li>Selecione a empresa acima e baixe o <strong>Instalador V4</strong> — o token da empresa já vem embutido no nome do arquivo (<code className="bg-black/30 px-1 py-0.5 rounded text-green-400">_TK&lt;token&gt;.ps1</code>)</li>
+                <li><strong>Não renomeie o arquivo</strong> — a assinatura Authenticode permanece válida porque o conteúdo não é alterado</li>
+                <li>Na máquina alvo, abra o <strong>PowerShell como Administrador</strong> e execute o .ps1 — sem parâmetros</li>
+                <li>Verifique em <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">services.msc</code> que <strong>Winner RMM Agent</strong> está rodando</li>
               </ol>
             </div>
 
             <div>
-              <h4 className="tm-text font-medium mb-1">🏢 Deploy em Massa (GPO / Intune)</h4>
+              <h4 className="tm-text font-medium mb-1">🏢 Deploy em Massa (GPO / Intune) — arquivo único</h4>
               <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
-                <li>Copie <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">Instalar_RMM_Winner_V4.ps1</code> para um compartilhamento de rede</li>
-                <li>Crie GPO com script de inicialização ou política do Intune</li>
-                <li>Parâmetros obrigatórios: <code className="bg-black/30 px-2 py-0.5 rounded text-green-400">-CompanyToken &quot;TOKEN&quot; -ApiUrl &quot;https://wticorp.com.br/api/rmm&quot;</code></li>
-                <li>O script é assinado com Authenticode Winner — não requer relaxamento de política de execução</li>
+                <li>Baixe o Instalador V4 da empresa e copie <strong>apenas esse arquivo</strong> para o compartilhamento — agente e watchdog são baixados do servidor com verificação SHA-256 contra o manifest</li>
+                <li><strong>GPO:</strong> script de inicialização apontando para o .ps1 no share (o nome do arquivo carrega o token — não renomeie)</li>
+                <li><strong>Intune (app Win32 / .intunewin):</strong> o nome interno é preservado; se usar &quot;Platform scripts&quot; (que renomeia o arquivo), passe <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">-CompanyToken &quot;TOKEN&quot;</code> na linha de comando</li>
+                <li>Silencioso: defina <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">$env:RMM_SILENT=1</code> antes de executar</li>
               </ol>
             </div>
 

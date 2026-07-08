@@ -2,21 +2,21 @@
     "version":  "4.0.0",
     "signed":  true,
     "cert_thumbprint":  "6CCD3489FDE681CC78CECFCC0FFDC426A2CEFA5C",
-    "generated_utc":  "2026-07-07T22:50:45Z",
+    "generated_utc":  "2026-07-08T12:10:58Z",
     "files":  [
                   {
                       "name":  "agente_rmm_v4.ps1",
-                      "sha256":  "265062240C6FE253377B032D6B1C9230CFC721A6C2B647C54ABF6391C8E61ECC",
+                      "sha256":  "F00BBEAB3E147980E68D4F2B0BA3CD0CB49BAECC67D26F3F0D58563965B0052A",
                       "url":  "https://wticorp.com.br/rmm/v4/agente_rmm_v4.ps1"
                   },
                   {
                       "name":  "watchdog_v4.ps1",
-                      "sha256":  "29EBF60D1A5BA721B18D26D78456605E0E56FD78EC1DF8649D27574109A9CCD3",
+                      "sha256":  "4AD3F69C5A168B62AFDB9378CC6F0B80202FA02689CC0F857128D901365B86B7",
                       "url":  "https://wticorp.com.br/rmm/v4/watchdog_v4.ps1"
                   },
                   {
                       "name":  "Instalar_RMM_Winner_V4.ps1",
-                      "sha256":  "85A7CD36C5471B19B5BA39193557032F6765AE66CD2E584BB2292F7CCEE1D4AB",
+                      "sha256":  "4E7E9780DF2BA077C87A7C2AD0ED3D0AB2F1C2D1AD50FFE1387EEF68677D9FAF",
                       "url":  "https://wticorp.com.br/rmm/v4/Instalar_RMM_Winner_V4.ps1"
                   }
               ]

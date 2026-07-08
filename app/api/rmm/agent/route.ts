@@ -825,7 +825,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { companyId, format } = body; // format: 'installer' | 'agent_ps1' | 'agent_py' | 'uninstall'
+    const { companyId, format } = body; // format: 'installer_v4' | 'installer' | 'agent_ps1' | 'agent_py' | 'watchdog' | 'ps2exe' | 'uninstall'
 
     if (!companyId) {
       return NextResponse.json({ error: 'Empresa obrigatória' }, { status: 400 });
@@ -852,6 +852,30 @@ export async function POST(request: NextRequest) {
     const baseUrl = `${proto}://${host}`;
     const apiUrl = (baseUrl || process.env.NEXTAUTH_URL || 'https://www.wticorp.com.br') + '/api/rmm';
     const safeName = company.name.replace(/[^a-zA-Z0-9]/g, '_');
+
+    // ============================================================
+    // Instalador V4 ASSINADO com token no NOME DO ARQUIVO
+    // O conteudo e servido byte a byte identico ao arquivo assinado
+    // (Authenticode permanece VALIDO). O token vai no filename
+    // (Instalar_RMM_Winner_V4_<Empresa>_TK<token>.ps1) e o instalador
+    // o extrai em runtime — mesmo padrao de NinjaOne/Datto.
+    // NAO renomear o arquivo apos o download.
+    // ============================================================
+    if (format === 'installer_v4') {
+      const v4Path = path.join(process.cwd(), 'public', 'rmm', 'v4', 'Instalar_RMM_Winner_V4.ps1');
+      if (!fs.existsSync(v4Path)) {
+        return NextResponse.json({ error: 'Instalador V4 não publicado em /rmm/v4' }, { status: 404 });
+      }
+      const contentV4 = fs.readFileSync(v4Path); // Buffer intacto — preserva assinatura
+      const filenameV4 = `Instalar_RMM_Winner_V4_${safeName}_TK${company.rmmToken}.ps1`;
+      return new NextResponse(contentV4, {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Disposition': `attachment; filename="${filenameV4}"`,
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
 
     if (format === 'uninstall') {
       const content = generateUninstaller();

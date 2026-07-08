@@ -4,13 +4,21 @@
 #  Cliente-agnostico: agente/watchdog sao IGUAIS para todos os
 #  clientes; o que muda por cliente e o config.json + token (DPAPI).
 #
-#  USO (multi-cliente):
-#   .\Instalar_RMM_Winner_V4.ps1 -CompanyToken "<TOKEN_DO_CLIENTE>" `
-#        -ApiUrl "https://wticorp.com.br/api/rmm" -ClientName "Constance"
+#  USO (multi-cliente) - 3 formas de informar o token:
+#   1) Parametro (prioridade maxima):
+#      .\Instalar_RMM_Winner_V4.ps1 -CompanyToken "<TOKEN_DO_CLIENTE>" `
+#           -ApiUrl "https://wticorp.com.br/api/rmm" -ClientName "Constance"
+#   2) NOME DO ARQUIVO (padrao de mercado - preserva a assinatura
+#      Authenticode, pois o nome nao faz parte do conteudo assinado):
+#      Instalar_RMM_Winner_V4_<Cliente>_TK<token_hex>.ps1
+#      O portal ja baixa o instalador renomeado assim. NAO renomeie.
+#   3) Ja instalado: reutiliza secure\token.dat existente (reinstalacao).
 #
-#  Deploy silencioso (GPO/Intune): passe os parametros e defina
-#   $env:RMM_SILENT=1. Requer os 3 arquivos juntos:
-#   Instalar_RMM_Winner_V4.ps1 + agente_rmm_v4.ps1 + watchdog_v4.ps1
+#  SINGLE-FILE DEPLOY (GPO/Intune): este arquivo sozinho basta.
+#   Se agente_rmm_v4.ps1 / watchdog_v4.ps1 nao estiverem na mesma
+#   pasta, sao baixados de <ApiUrl base>/rmm/v4/ e validados por
+#   SHA256 contra o manifest.json publicado no release assinado.
+#  Deploy silencioso: defina $env:RMM_SILENT=1.
 #  Execute como Administrador.
 # ============================================================
 
@@ -40,6 +48,20 @@ $WatchdogTaskName = "WinnerRMMWatchdog"
 $ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 $BASE_SITE_URL = $ApiUrl -replace '/api/rmm/?$',''
+
+# ---------- Token/Cliente a partir do NOME DO ARQUIVO ----------
+# Padrao: Instalar_RMM_Winner_V4_<Cliente>_TK<token_hex>.ps1
+# O nome do arquivo NAO faz parte do conteudo assinado (Authenticode),
+# entao o portal entrega o MESMO binario assinado, apenas renomeado.
+$ScriptFileName = Split-Path -Leaf $MyInvocation.MyCommand.Definition
+if (-not $CompanyToken -and $ScriptFileName -match '_TK([0-9a-fA-F]{32,128})\.ps1$') {
+    $CompanyToken = $Matches[1].ToLower()
+    Write-Host "[Token] Extraido do nome do arquivo ($($CompanyToken.Substring(0,8))...)." -ForegroundColor Green
+}
+if (-not $ClientName -and $ScriptFileName -match '^Instalar_RMM_Winner_V4_(.+)_TK[0-9a-fA-F]{32,128}\.ps1$') {
+    $ClientName = ($Matches[1] -replace '_',' ').Trim()
+}
+
 $NssmUrls = @(
     "$BASE_SITE_URL/rmm/nssm-2.24-win64.zip",
     "https://github.com/ONLYOFFICE/nssm/releases/download/v2.24/nssm_x64.zip",
@@ -84,18 +106,52 @@ if (Test-Path "C:\ProgramData\WinnerRMM\agente_rmm_v3.ps1") {
     Write-Host "       (Detectada instalacao V3 em ProgramData - sera substituida pela V4 em Program Files)" -ForegroundColor DarkGray
 }
 
-# ---------- Copiar agente + watchdog ----------
+# ---------- Copiar agente + watchdog (local ou download assinado) ----------
 Write-Host "[4/9] Instalando agente e watchdog..." -ForegroundColor Cyan
 $srcAgent    = Join-Path $ScriptDir "agente_rmm_v4.ps1"
 $srcWatchdog = Join-Path $ScriptDir "watchdog_v4.ps1"
-if (-not (Test-Path $srcAgent) -or -not (Test-Path $srcWatchdog)) {
-    Write-Host "[ERRO] agente_rmm_v4.ps1 e/ou watchdog_v4.ps1 nao encontrados em $ScriptDir." -ForegroundColor Red
-    Write-Host "       Deploy o pacote completo (3 arquivos juntos)." -ForegroundColor Yellow
-    if (-not $Silent) { Read-Host "Enter para sair" }; exit 1
+
+function Get-V4FileFromServer {
+    param([string]$Name, [string]$Destination, $Manifest)
+    $url = "$BASE_SITE_URL/rmm/v4/$Name"
+    $tmp = "$Destination.download"
+    Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+    if ($Manifest) {
+        $entry = $Manifest.files | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+        if ($entry -and $entry.sha256) {
+            $hash = (Get-FileHash -Path $tmp -Algorithm SHA256).Hash
+            if ($hash -ne $entry.sha256.ToUpper()) {
+                Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+                throw "SHA256 de $Name nao confere com o manifest (esperado $($entry.sha256), obtido $hash). Possivel adulteracao - abortando."
+            }
+            Write-Host "       $Name baixado e SHA256 validado." -ForegroundColor Green
+        } else {
+            Write-Host "       [AVISO] $Name sem entrada no manifest; hash nao verificado." -ForegroundColor Yellow
+        }
+    }
+    Move-Item -Path $tmp -Destination $Destination -Force
 }
-Copy-Item -Path $srcAgent    -Destination $AgentFile    -Force
-Copy-Item -Path $srcWatchdog -Destination $WatchdogFile -Force
-Write-Host "       Scripts copiados para $InstallDir" -ForegroundColor Green
+
+if ((Test-Path $srcAgent) -and (Test-Path $srcWatchdog)) {
+    Copy-Item -Path $srcAgent    -Destination $AgentFile    -Force
+    Copy-Item -Path $srcWatchdog -Destination $WatchdogFile -Force
+    Write-Host "       Scripts copiados de $ScriptDir" -ForegroundColor Green
+} else {
+    Write-Host "       Arquivos nao encontrados em $ScriptDir - baixando do servidor (single-file deploy)..." -ForegroundColor Yellow
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $manifest = $null
+        try { $manifest = Invoke-RestMethod -Uri "$BASE_SITE_URL/rmm/v4/manifest.json" -UseBasicParsing -TimeoutSec 30 } catch {
+            Write-Host "       [AVISO] manifest.json indisponivel; download sem verificacao de hash." -ForegroundColor Yellow
+        }
+        Get-V4FileFromServer -Name "agente_rmm_v4.ps1"  -Destination $AgentFile    -Manifest $manifest
+        Get-V4FileFromServer -Name "watchdog_v4.ps1"    -Destination $WatchdogFile -Manifest $manifest
+    } catch {
+        Write-Host "[ERRO] Falha ao obter agente/watchdog do servidor: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "       Alternativa: deploy o pacote completo (3 arquivos juntos)." -ForegroundColor Yellow
+        if (-not $Silent) { Read-Host "Enter para sair" }; exit 1
+    }
+}
 
 # ---------- config.json + token (DPAPI) ----------
 Write-Host "[5/9] Configuracao e token..." -ForegroundColor Cyan
@@ -128,8 +184,11 @@ if ($CompanyToken) {
         $config['COMPANY_TOKEN'] = $CompanyToken
         $config | ConvertTo-Json | Set-Content -Path $ConfigFile -Encoding UTF8 -Force
     }
+} elseif (Test-Path $TokenFile) {
+    Write-Host "       Token nao informado; reutilizando token.dat existente (reinstalacao)." -ForegroundColor Green
 } else {
-    Write-Host "       [AVISO] -CompanyToken nao informado. Configure o token antes de operar." -ForegroundColor Yellow
+    Write-Host "       [AVISO] Token nao informado (nem via -CompanyToken, nem no nome do arquivo)." -ForegroundColor Yellow
+    Write-Host "               Baixe o instalador pelo portal (nome contem _TK<token>) ou passe -CompanyToken." -ForegroundColor Yellow
 }
 
 # ---------- NSSM ----------
@@ -249,13 +308,12 @@ Write-Host "    - Watchdog detecta servico parado E processo TRAVADO" -Foregroun
 Write-Host "    - Token cifrado em repouso (DPAPI)" -ForegroundColor Gray
 Write-Host ""
 if (-not $svcStarted) { Write-Host "  [DIAG] Servico ainda nao iniciou; o watchdog assume em ~2-5 min. Ver $InstallDir\service_stderr.log" -ForegroundColor Yellow }
-if (-not $Silent) { try { Read-Host "Pressione Enter para fechar" } catch {} }
-
+if (-not $Silent) { try { Read-Host "Pressione Enter para fechar" } catch {} } 
 # SIG # Begin signature block
 # MIIdrwYJKoZIhvcNAQcCoIIdoDCCHZwCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhgtnQLzEn6tdL
-# rbswDVnon5wFfUa/1rKX8l7wiXDgFaCCF2gwggQqMIICkqADAgECAhBz5g8PdNx1
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFvMgyiLmysVc+
+# KtX+cics1iZQNQyIST0WaxXpBl1YoKCCF2gwggQqMIICkqADAgECAhBz5g8PdNx1
 # ukWTcGHAOULUMA0GCSqGSIb3DQEBCwUAMC0xKzApBgNVBAMMIldpbm5lciBUZWNu
 # b2xvZ2lhIFJNTSBDb2RlIFNpZ25pbmcwHhcNMjYwNzA3MjI0MDM5WhcNMzEwNzA3
 # MjI1MDM5WjAtMSswKQYDVQQDDCJXaW5uZXIgVGVjbm9sb2dpYSBSTU0gQ29kZSBT
@@ -384,31 +442,31 @@ if (-not $Silent) { try { Read-Host "Pressione Enter para fechar" } catch {} }
 # ZXIgVGVjbm9sb2dpYSBSTU0gQ29kZSBTaWduaW5nAhBz5g8PdNx1ukWTcGHAOULU
 # MA0GCWCGSAFlAwQCAQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEILlZfRBkhFP4W2X7Cy861jyR8RO4LydJ8RuX
-# jRP32kDiMA0GCSqGSIb3DQEBAQUABIIBgHiPaAdbmjhGKH5xCqx4tX6UvYs+Ociu
-# 00B/SbnDfp5jDXiMBBtemgD/xbALF09VpbfSg1Tmo609n9Y39W5kk6V4MbiMC+Ry
-# Cnma2SLsOH8fJA5ApzvdsyJjZxZYT+wzoXvWHxaJIBNMsVs+M2Ya+nTtAFknsZdm
-# 7uR2PXAdIao22x8WSCeubfMIjFeJDebjyfInh3dMjCuN4UeydWwR689TdsGqeuGE
-# 8V1Y2frchq4dC5HP2HFewufozm9cSDnKS1QDGvmOTzWj7nsdisRCpFZJxp7fDTgG
-# P3UDoW2Ll1X1Kh1191IIC6NmDH5qtVEAvCwZh89Q5xbfro86MTeuG519uW5a7+bE
-# EYY7q0/eDApPwYCoHNtnkcGTQFZLwmBgRX7RddipcsYjnItDDOz2A+ZNLodjFmzb
-# koLfes8OaNfzS0s7jyaMiq/n7De69PYaIPoc/5Ml3tDGOwoH2KosgUU9aGvBOeWD
-# eLHBsxuGl75uDNYfYBV9gYw8if0PjJGqJKGCAyYwggMiBgkqhkiG9w0BCQYxggMT
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIBdOYGNXqiXZvckzYik0+blf8k/1lyeMQqh5
+# 7m/ixqOCMA0GCSqGSIb3DQEBAQUABIIBgHRUwfIGwcui6PRlAiK4BZ3WENuv9Pni
+# I3xPymOjYtBDfo3CBbyEj1QzFigO3joJ9Ev5QkELhG1HNutqMX50fvuvPOPJRsTv
+# TfG/oNCV/DPEjoGQI96ngzbtFd4Q7wdsiCfPjx6gulfzOZNK3uLTIbMvBeGIFV+A
+# 2nYWNGOvcspRwhymtvhemYs/AV7K0lJyCK2Qdhp0ua+R56ybJiogyc8U8lpWe20T
+# bb1uOxMJxs957UsjyJB7/9LAQufhEEHnWjYKR8JtPWwk1zPeXiRWXekA0PzeJI67
+# 7vTv/BUNltKWHeYhGLAZVyuV/PvnmKuNlftpRyMniaSJ4dEpskJcGuMewq511Ipr
+# MYwbMsYVmy5+LzWwulFP3MGSQ8j7iJp9Mcgaf5N4xE0MjCDOo8sCZMQgBJ/4aN19
+# sJGcJZWyCeJ/SvVU/iQYVoMkKe6k9bFoIDgCc3n3y6n04bBSuu6mAZEb/135DRJ4
+# gFYS+I8gYeHGeWXp9bO8ykUOLMPTLYR1pqGCAyYwggMiBgkqhkiG9w0BCQYxggMT
 # MIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5j
 # LjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNB
 # NDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUD
 # BAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEP
-# Fw0yNjA3MDcyMjUwNDRaMC8GCSqGSIb3DQEJBDEiBCDD4roiFW4QEtnGFbzeOGpn
-# BKtKDUqYmWpMtWFMhqs9BDANBgkqhkiG9w0BAQEFAASCAgCOAm1XQA+MGKuCSVge
-# EcHrAh7DWlEZA6F3bXFEaipL++NmbgE2gk/iTpSQj0Pbxb9NgVQ+rViIPh2Y+UL5
-# dHm18PNMwfE16gKOAYvQWIfZBuF4sM5tMbczQ91noTU9JY0JolsxYPVYbKs4WaFF
-# adORMetCSW+zkqUjdxzZWiXA/d+y2gCCLQ5Chj0tD8KiH94F6qflZmgGRZdKdSou
-# ZFJVo82c23dIMZdLGu8YGpTkzWbCSJhUSIISDE0zMfiEkhnz8tKUmP80U11Rnhhd
-# CAZoMi6zAgF3k4AHps1kIXeC4j1amv2XlfRZYY9MqmCbRRQpUrM01m/Pi5BxxGBa
-# MISzQIj8Cei/WUZ52jZScsXHRDTZPo2sGhOG92/FXx6Nq1ATnvNlA4qpMjwnGcPl
-# 96x50EYSQLjVxf90gji9UaahX9ZbjfSnQH5fEWOOZ6cD8/c/WOFl9TFMbzx/Q7sO
-# BDmAwhsVNiza6RngBmXMfVNJhVBuTo2Uej78Qw3OSXu4hUc3cJfSuz/e9CUq6ypL
-# CvCht60YY1aV9QZ28JfBoeYY+CYo+eQtKziWCLnDsfGii4lg2NFwAgOIdLjwQ95l
-# mi+vJl7dcO7AurgKyAfjC6tp3W9Ynfth06FXTHQfVO7DbVNRbVM9f8QEECxCdaTq
-# TAVyWDPPaeiF5MBMWyJnBiTl0A==
+# Fw0yNjA3MDgxMjEwNTdaMC8GCSqGSIb3DQEJBDEiBCCKhcWLPXGOmlsQ+6gdZp4h
+# zqSHXXgWwdhbS9oQaT/tKjANBgkqhkiG9w0BAQEFAASCAgCDDla75xACammI8Evc
+# rMNlvN1zcYmIdLDWNZFn2/FGM6zlXlkxarv7lRrAUjmOgpaKOB1WUJqjNif5AK5C
+# 5N/FhcayGkCfrE/evJC3RbO6E0CicTvdBJoRCw7RNcXOi3gJfWmi+XNdJkMf4JiV
+# /HImVE9pRWCuyIDalSOuysW4UHF5MQD3UhayP3cI7+Sir6t1lll15Y/PwCiGdGa2
+# qt9DB80xigbF391T0l/o/OqKQiJ2rrEaCdLcwnaI3BrgGgZhfyJYfjGTvTfeMnaB
+# ou3OpEr4rnUdxh3KUmk8XTgaHgjngRJ+dRm91cexJTpUQ4J4DT03xdk71Wrk7i92
+# iIAQ24RMc0+YuLwnrAX779FIu9UbmmEWd/Pn4tm9X69IZYOyMrqn330ARbA7IMBm
+# UZkDW2nirU5DlN+Rd5frRmoaDa/ZyuYts/ebn3im4ys4JhhLddMAOGigFD+RfN4T
+# G20diARNuPnGJAOSrDoIdhqhM4JtQ4X9/DoPvuLobSIqVUc3cEo+jv2tYkQ8+tuo
+# mrtxp8TdwIplqjRSEeMRetIEyX4zksVr0dvIck1dQ7TQVpJZyRII9kt87zcyCtMT
+# lMAXrD9l0efg4hV9dOReWFHvAjjQfB6CFe7zVW/ybG6idXTean6Aqm3k4K1OniGH
+# 7jNCsynTuR+84xzUDoy3EgLd9A==
 # SIG # End signature block
