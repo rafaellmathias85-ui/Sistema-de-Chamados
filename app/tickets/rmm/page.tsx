@@ -264,6 +264,18 @@ export default function RmmDashboardPage() {
     });
   };
 
+  const timeAgo = (d: string | null) => {
+    if (!d) return null;
+    const diff = Date.now() - new Date(d).getTime();
+    const mins = Math.floor(diff / 60000);
+    const hours = Math.floor(mins / 60);
+    const days = Math.floor(hours / 24);
+    if (days > 0) return `há ${days} dia${days > 1 ? 's' : ''}`;
+    if (hours > 0) return `há ${hours}h`;
+    if (mins > 0) return `há ${mins}min`;
+    return 'agora';
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -522,7 +534,14 @@ export default function RmmDashboardPage() {
                       })()}
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell">
-                      <span className="tm-text-secondary text-xs">{formatDate(m.lastCheckin)}</span>
+                      {m.status !== 'Ligado' && m.lastCheckin ? (
+                        <div>
+                          <span className="text-orange-400 text-xs font-medium block">{timeAgo(m.lastCheckin)}</span>
+                          <span className="tm-text-muted text-[10px]">{formatDate(m.lastCheckin)}</span>
+                        </div>
+                      ) : (
+                        <span className="tm-text-secondary text-xs">{formatDate(m.lastCheckin)}</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">

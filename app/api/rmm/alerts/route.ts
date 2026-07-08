@@ -44,7 +44,22 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
     }
 
-    const { alertId, action } = await request.json(); // action: 'close' | 'create_ticket'
+    const { alertId, action } = await request.json(); // action: 'close' | 'create_ticket' | 'close_all'
+
+    // Reconhecer e fechar TODOS os alertas pendentes de uma vez
+    if (action === 'close_all') {
+      const result = await prisma.rmmAlert.updateMany({
+        where: { acknowledged: false },
+        data: {
+          acknowledged: true,
+          acknowledgedByName: session.user.name || session.user.email,
+          acknowledgedAt: new Date(),
+          actionTaken: 'closed',
+        },
+      });
+      return NextResponse.json({ success: true, count: result.count });
+    }
+
     if (!alertId) {
       return NextResponse.json({ error: 'alertId obrigatório' }, { status: 400 });
     }

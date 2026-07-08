@@ -197,9 +197,27 @@ export default function TicketsLayout({
                     <div className="absolute right-0 mt-2 w-80 tm-bg-card border tm-border rounded-lg shadow-xl z-50 overflow-hidden">
                       <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
                         <span className="text-sm font-semibold text-white">Notificações</span>
-                        {notifCount > 0 && (
-                          <span className="text-xs text-cyan-400">{notifCount} pendente(s)</span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {notifCount > 0 && (
+                            <span className="text-xs text-cyan-400">{notifCount} pendente(s)</span>
+                          )}
+                          {rmmAlerts.length > 0 && (
+                            <button
+                              onClick={async () => {
+                                await fetch('/api/rmm/alerts', {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'close_all' }),
+                                });
+                                loadNotifications();
+                              }}
+                              className="text-xs text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-400/50 px-2 py-0.5 rounded transition-colors"
+                              title="Limpar todos os alertas RMM"
+                            >
+                              Limpar alertas
+                            </button>
+                          )}
+                        </div>
                       </div>
                       {notifTickets.length === 0 && pendingTransfers.length === 0 && rmmAlerts.length === 0 && unassignedTickets.length === 0 && reopenedTickets.length === 0 ? (
                         <div className="px-4 py-8 text-center tm-text-muted text-sm">
