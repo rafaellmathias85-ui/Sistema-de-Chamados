@@ -1,7 +1,7 @@
 'use client';
 
 import { useSession } from 'next-auth/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -18,6 +18,7 @@ import {
   X,
   Ticket,
   Trash2,
+  Building2,
 } from 'lucide-react';
 
 interface Alert {
@@ -45,13 +46,14 @@ export default function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'acked'>('pending');
+  const [companyFilter, setCompanyFilter] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionModal, setActionModal] = useState<Alert | null>(null);
 
   const fetchAlerts = async () => {
     try {
       const acked = filter === 'pending' ? 'false' : filter === 'acked' ? 'true' : '';
-      const url = `/api/rmm/alerts?limit=100${acked ? `&acknowledged=${acked}` : ''}`;
+      const url = `/api/rmm/alerts?limit=200${acked ? `&acknowledged=${acked}` : ''}`;
       const res = await fetch(url);
       if (res.ok) setAlerts(await res.json());
     } catch (e) { console.error(e); }
@@ -84,6 +86,35 @@ export default function AlertsPage() {
     finally { setProcessingId(null); }
   };
 
+  const handleDelete = async (alertId: string) => {
+    if (!confirm('Excluir este alerta permanentemente?')) return;
+    setProcessingId(alertId);
+    try {
+      const res = await fetch('/api/rmm/alerts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alertId }),
+      });
+      if (res.ok) {
+        setAlerts(prev => prev.filter(x => x.id !== alertId));
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Erro ao excluir');
+      }
+    } catch { alert('Erro ao excluir'); }
+    finally { setProcessingId(null); }
+  };
+
+  const companies = useMemo(() => {
+    const names = [...new Set(alerts.map(a => a.machine.company?.name).filter(Boolean))];
+    return names.sort();
+  }, [alerts]);
+
+  const filteredAlerts = useMemo(() => {
+    if (!companyFilter) return alerts;
+    return alerts.filter(a => a.machine.company?.name === companyFilter);
+  }, [alerts, companyFilter]);
+
   const severityColors: Record<string, string> = {
     critical: 'bg-red-500/20 text-red-400 border-red-500/30',
     warning: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
@@ -106,29 +137,46 @@ export default function AlertsPage() {
         <Link href="/tickets/rmm" className="p-2 tm-text-secondary hover:tm-text transition-colors">
           <ArrowLeft className="w-5 h-5" />
         </Link>
+        <Bell className="w-6 h-6 text-yellow-400" />
         <h1 className="text-2xl font-bold tm-text">Alertas RMM</h1>
       </div>
 
-      {/* Filter */}
-      <div className="flex items-center gap-2">
-        <Filter className="w-4 h-4 tm-text-secondary" />
-        {(['pending', 'acked', 'all'] as const).map(f => (
-          <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${filter === f ? 'bg-blue-600 text-white' : 'tm-bg-card tm-text-secondary hover:tm-text'}`}>
-            {f === 'pending' ? 'Pendentes' : f === 'acked' ? 'Reconhecidos' : 'Todos'}
-          </button>
-        ))}
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 tm-text-secondary" />
+          {(['pending', 'acked', 'all'] as const).map(f => (
+            <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${filter === f ? 'bg-blue-600 text-white' : 'tm-bg-card tm-text-secondary hover:tm-text'}`}>
+              {f === 'pending' ? 'Pendentes' : f === 'acked' ? 'Reconhecidos' : 'Todos'}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 ml-auto">
+          <Building2 className="w-4 h-4 tm-text-secondary" />
+          <select
+            value={companyFilter}
+            onChange={e => setCompanyFilter(e.target.value)}
+            className="px-3 py-1.5 tm-bg-card border tm-border rounded-lg tm-text text-sm focus:outline-none focus:border-blue-500"
+          >
+            <option value="">Todos os clientes</option>
+            {companies.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-400" /></div>
-      ) : alerts.length === 0 ? (
+      ) : filteredAlerts.length === 0 ? (
         <div className="text-center py-12 tm-text-secondary">
           <BellOff className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>Nenhum alerta {filter === 'pending' ? 'pendente' : filter === 'acked' ? 'reconhecido' : ''}</p>
+          <p>Nenhum alerta {filter === 'pending' ? 'pendente' : filter === 'acked' ? 'reconhecido' : ''}{companyFilter ? ` para ${companyFilter}` : ''}</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {alerts.map(a => (
+          {filteredAlerts.map(a => (
             <motion.div key={a.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={`rounded-xl p-4 border ${severityColors[a.severity] || severityColors.warning} ${a.acknowledged ? 'opacity-60' : ''}`}>
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3">
@@ -146,7 +194,7 @@ export default function AlertsPage() {
                         <><Monitor className="w-3.5 h-3.5" /><Link href={`/tickets/rmm/machine/${a.machineId}`} className="hover:text-blue-400">{a.machine.hostname}</Link></>
                       )}
                       <span>•</span>
-                      <span>{a.machine.company?.name}</span>
+                      <span className="font-medium">{a.machine.company?.name}</span>
                       <span>•</span>
                       <span>{typeLabels[a.alertType] || a.alertType}</span>
                       <span>•</span>
@@ -177,25 +225,14 @@ export default function AlertsPage() {
                       Reconhecer
                     </button>
                   )}
-                  {a.acknowledged && (
-                    <button
-                      onClick={async () => {
-                        if (!confirm('Excluir este alerta permanentemente?')) return;
-                        setProcessingId(a.id);
-                        try {
-                          const res = await fetch('/api/rmm/alerts', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alertId: a.id }) });
-                          if (res.ok) { setAlerts(prev => prev.filter(x => x.id !== a.id)); }
-                          else { const d = await res.json(); alert(d.error || 'Erro'); }
-                        } catch { alert('Erro ao excluir'); }
-                        finally { setProcessingId(null); }
-                      }}
-                      disabled={processingId === a.id}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm transition-colors disabled:opacity-50 border border-red-500/20"
-                    >
-                      {processingId === a.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                      Excluir
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleDelete(a.id)}
+                    disabled={processingId === a.id}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm transition-colors disabled:opacity-50 border border-red-500/20"
+                  >
+                    {processingId === a.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    Excluir
+                  </button>
                 </div>
               </div>
             </motion.div>

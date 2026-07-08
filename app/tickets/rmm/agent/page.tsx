@@ -229,26 +229,28 @@ export default function AgentGeneratorPage() {
             <div className="mb-4 p-3 bg-black/40 border border-emerald-500/20 rounded-lg">
               <p className="text-xs text-emerald-400 mb-1 font-medium">Comando de instalação V4 (PowerShell como Admin):</p>
               <code className="text-xs text-green-300 font-mono break-all">
-                {`.\\ Instalar_RMM_Winner_V4.ps1 -CompanyToken "${tokenInfo.token}" -ApiUrl "https://wticorp.com.br/api/rmm"`}
+                {`Set-ExecutionPolicy Bypass -Scope Process -Force; .\\Instalar_RMM_Winner_V4.ps1 -CompanyToken "${tokenInfo.token}" -ApiUrl "https://wticorp.com.br/api/rmm"`}
               </code>
             </div>
           )}
 
           <div className="border-t tm-border my-4" />
 
-          {/* Instalador principal V3 */}
+          {/* Instalador V3 — Legacy */}
           <button
             onClick={() => handleDownload('installer')}
             disabled={generating}
-            className="w-full flex items-center gap-4 p-5 mb-4 bg-accent-blue/10 border-2 border-accent-blue/30 rounded-xl hover:bg-accent-blue/20 hover:border-accent-blue/50 transition disabled:opacity-50"
+            className="w-full flex items-center gap-4 p-5 mb-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition disabled:opacity-50 opacity-80"
           >
-            <div className="p-3 bg-accent-blue/20 rounded-lg">
-              <Shield size={28} className="text-accent-blue" />
+            <div className="p-3 bg-white/10 rounded-lg">
+              <Shield size={28} className="tm-text-secondary" />
             </div>
             <div className="text-left flex-1">
-              <span className="tm-text font-semibold text-lg block">⭐ Instalador Completo V3 (Windows Service + NSSM)</span>
+              <span className="tm-text font-semibold text-lg block flex items-center gap-2">
+                Instalador V3 (Legacy) <span className="text-xs bg-white/10 tm-text-secondary border border-white/10 px-2 py-0.5 rounded-full font-normal">TOKEN EMBUTIDO</span>
+              </span>
               <span className="tm-text-secondary text-sm">Windows Service via NSSM + Watchdog + DACL anti-tamper + SCM auto-recovery + dual-server fallback</span>
-              <span className="text-accent-blue text-xs block mt-1">Instalar_RMM_Winner_*.ps1 · Recomendado para GPO / Intune</span>
+              <span className="tm-text-muted text-xs block mt-1">Instalar_RMM_Winner_*.ps1 · Compatível com GPO / Intune — sem assinatura Authenticode</span>
             </div>
           </button>
 
@@ -308,52 +310,83 @@ export default function AgentGeneratorPage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-6"
+        className="space-y-4"
       >
-        <h3 className="text-blue-400 font-semibold mb-3 flex items-center gap-2">
-          <Info size={18} />
-          Instruções de Instalação V3
-        </h3>
-        <div className="space-y-4 text-sm">
-          <div>
-            <h4 className="tm-text font-medium mb-1">📦 Instalação Manual (1 máquina)</h4>
-            <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
-              <li>Baixe o <strong>Instalador Completo V3</strong> (.ps1)</li>
-              <li>Na máquina alvo, clique com botão direito no arquivo → <strong>Executar com PowerShell como Admin</strong></li>
-              <li>O instalador baixa NSSM, registra o agente como Windows Service e configura o watchdog</li>
-              <li>Verifique em <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">services.msc</code> que &quot;Winner RMM Agent&quot; está rodando</li>
-            </ol>
-          </div>
+        {/* V4 Instructions — Primary */}
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-6">
+          <h3 className="text-emerald-400 font-semibold mb-3 flex items-center gap-2">
+            <Shield size={18} />
+            Instalação V4 — Recomendado
+          </h3>
+          <div className="space-y-4 text-sm">
+            <div>
+              <h4 className="tm-text font-medium mb-1">📦 Instalação Manual (1 máquina)</h4>
+              <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
+                <li>Selecione a empresa acima e copie o <strong>Comando de instalação V4</strong></li>
+                <li>Na máquina alvo, abra o <strong>PowerShell como Administrador</strong></li>
+                <li>Cole e execute o comando — o instalador configura o serviço, watchdog e certificado automaticamente</li>
+                <li>Verifique em <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">services.msc</code> que <strong>WinnerRMM</strong> está rodando</li>
+              </ol>
+            </div>
 
-          <div>
-            <h4 className="tm-text font-medium mb-1">🏢 Deploy em Massa (GPO / Intune)</h4>
-            <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
-              <li>Copie o instalador para um compartilhamento de rede acessível</li>
-              <li>Crie uma GPO com script de inicialização ou política do Intune</li>
-              <li>Comando silencioso: <code className="bg-black/30 px-2 py-0.5 rounded text-green-400">powershell -ExecutionPolicy Bypass -File &quot;\\servidor\rmm\Instalar_RMM_Winner.ps1&quot;</code></li>
-              <li>Remova a linha <code className="bg-black/30 px-1 py-0.5 rounded text-yellow-400">Read-Host</code> do final do script para deploy silencioso</li>
-            </ol>
-          </div>
+            <div>
+              <h4 className="tm-text font-medium mb-1">🏢 Deploy em Massa (GPO / Intune)</h4>
+              <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
+                <li>Copie <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">Instalar_RMM_Winner_V4.ps1</code> para um compartilhamento de rede</li>
+                <li>Crie GPO com script de inicialização ou política do Intune</li>
+                <li>Parâmetros obrigatórios: <code className="bg-black/30 px-2 py-0.5 rounded text-green-400">-CompanyToken &quot;TOKEN&quot; -ApiUrl &quot;https://wticorp.com.br/api/rmm&quot;</code></li>
+                <li>O script é assinado com Authenticode Winner — não requer relaxamento de política de execução</li>
+              </ol>
+            </div>
 
-          <div>
-            <h4 className="tm-text font-medium mb-1">🛡️ Proteções do V3</h4>
-            <ul className="tm-text space-y-1 list-disc list-inside ml-2">
-              <li><strong>Windows Service (NSSM)</strong> — Não é removido por antivírus/EDR como Scheduled Tasks</li>
-              <li><strong>SCM Auto-Recovery</strong> — Se o service crashar, reinicia em 10s/30s/60s automaticamente</li>
-              <li><strong>Watchdog Independente</strong> — Task que verifica a cada 15 min se o service existe e o recria</li>
-              <li><strong>DACL Anti-Tamper</strong> — Diretório protegido: apenas SYSTEM tem FullControl</li>
-              <li><strong>Dual-Server Fallback</strong> — Se um servidor cair, usa o outro automaticamente</li>
-              <li><strong>Self-Update</strong> — Verifica atualizações a cada 6h e aplica automaticamente</li>
-            </ul>
+            <div>
+              <h4 className="tm-text font-medium mb-1">🛡️ Proteções do V4</h4>
+              <ul className="tm-text space-y-1 list-disc list-inside ml-2">
+                <li><strong>Authenticode Assinado</strong> — Certificado Winner; compatível com AppLocker e WDAC</li>
+                <li><strong>Watchdog Hang-Aware</strong> — Detecta agente travado e reinicia automaticamente</li>
+                <li><strong>Config DPAPI</strong> — Token armazenado criptografado no perfil SYSTEM</li>
+                <li><strong>Auto-Update via Manifest</strong> — Baixa e aplica nova versão com verificação SHA-256</li>
+                <li><strong>Windows Service (NSSM)</strong> + SCM Auto-Recovery + DACL Anti-Tamper</li>
+              </ul>
+            </div>
           </div>
+        </div>
 
-          <div>
-            <h4 className="tm-text font-medium mb-1">⚡ Compilar como EXE (opcional)</h4>
-            <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
-              <li>Baixe o script <strong>Compilar EXE</strong></li>
-              <li>Execute como Admin — ele instala ps2exe e gera WinnerRMM_Agent.exe</li>
-              <li>Use o EXE com NSSM para maior proteção contra engenharia reversa</li>
-            </ol>
+        {/* V3 Instructions — Legacy */}
+        <div className="bg-white/5 border border-white/10 rounded-xl p-6 opacity-80">
+          <h3 className="tm-text-secondary font-semibold mb-3 flex items-center gap-2">
+            <Info size={18} />
+            Instalador V3 (Legacy)
+          </h3>
+          <p className="text-xs tm-text-muted mb-4">Versão anterior sem assinatura Authenticode. Use V4 para novos deploys.</p>
+          <div className="space-y-4 text-sm">
+            <div>
+              <h4 className="tm-text font-medium mb-1">📦 Instalação Manual</h4>
+              <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
+                <li>Baixe o <strong>Instalador V3 (Legacy)</strong> acima — o token da empresa já está embutido</li>
+                <li>Clique com botão direito no arquivo → <strong>Executar com PowerShell como Admin</strong></li>
+                <li>O instalador baixa NSSM, registra o agente como Windows Service e configura o watchdog</li>
+                <li>Verifique em <code className="bg-black/30 px-1 py-0.5 rounded text-green-400">services.msc</code> que &quot;Winner RMM Agent&quot; está rodando</li>
+              </ol>
+            </div>
+
+            <div>
+              <h4 className="tm-text font-medium mb-1">🏢 GPO / Intune (V3)</h4>
+              <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
+                <li>Copie o instalador para um compartilhamento de rede acessível</li>
+                <li>Comando silencioso: <code className="bg-black/30 px-2 py-0.5 rounded text-green-400">powershell -ExecutionPolicy Bypass -File &quot;\\servidor\rmm\Instalar_RMM_Winner.ps1&quot;</code></li>
+                <li>Remova a linha <code className="bg-black/30 px-1 py-0.5 rounded text-yellow-400">Read-Host</code> do final do script para deploy silencioso</li>
+              </ol>
+            </div>
+
+            <div>
+              <h4 className="tm-text font-medium mb-1">⚡ Compilar como EXE (opcional)</h4>
+              <ol className="tm-text space-y-1 list-decimal list-inside ml-2">
+                <li>Baixe o script <strong>Compilar EXE</strong></li>
+                <li>Execute como Admin — ele instala ps2exe e gera WinnerRMM_Agent.exe</li>
+                <li>Use o EXE com NSSM para maior proteção contra engenharia reversa</li>
+              </ol>
+            </div>
           </div>
         </div>
       </motion.div>

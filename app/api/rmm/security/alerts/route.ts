@@ -34,6 +34,25 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// DELETE - Excluir alerta de segurança
+export async function DELETE(request: NextRequest) {
+  try {
+    const session = await getSession();
+    if (!session?.user || !['ADMIN', 'SUPPORT'].includes(session.user.role)) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+
+    const { id } = await request.json();
+    if (!id) return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
+
+    await prisma.securityAlert.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Delete security alert error:', error);
+    return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
+  }
+}
+
 // PATCH - Resolve alert
 export async function PATCH(request: NextRequest) {
   try {

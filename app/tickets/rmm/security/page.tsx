@@ -2,11 +2,11 @@
 
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   Shield, ShieldAlert, AlertTriangle, Eye, Ban, Check,
-  RefreshCw, Filter, ChevronLeft, Search, Loader2,
+  RefreshCw, Filter, ChevronLeft, Search, Loader2, Trash2, Building2,
 } from 'lucide-react';
 
 interface SecurityEvent {
@@ -50,7 +50,9 @@ export default function SecurityPage() {
   const [loading, setLoading] = useState(true);
   const [eventFilter, setEventFilter] = useState('');
   const [alertFilter, setAlertFilter] = useState('pending');
+  const [companyFilter, setCompanyFilter] = useState('');
   const [blocking, setBlocking] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   const loadEvents = useCallback(async () => {
@@ -81,6 +83,24 @@ export default function SecurityPage() {
     loadAlerts();
   };
 
+  const handleDelete = async (id: string) => {
+    if (!confirm('Excluir este alerta permanentemente?')) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch('/api/rmm/security/alerts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (res.ok) {
+        setAlerts(prev => prev.filter(a => a.id !== id));
+      } else {
+        const d = await res.json();
+        window.alert(d.error || 'Erro ao excluir');
+      }
+    } finally { setDeletingId(null); }
+  };
+
   const handleBlockIP = async (alert: SecurityAlert) => {
     if (!alert.ipAddress) return;
     if (!confirm(`Bloquear IP ${alert.ipAddress} na máquina ${alert.machine.hostname}?`)) return;
@@ -92,7 +112,7 @@ export default function SecurityPage() {
         body: JSON.stringify({ machineId: alert.machineId, ipAddress: alert.ipAddress, alertId: alert.id }),
       });
       const data = await res.json();
-      if (res.ok) { alert.resolved = true; loadAlerts(); }
+      if (res.ok) { loadAlerts(); }
       else window.alert(data.error || 'Erro ao bloquear');
     } finally { setBlocking(null); }
   };
@@ -101,17 +121,28 @@ export default function SecurityPage() {
 
   const fmt = (d: string) => new Date(d).toLocaleString('pt-BR');
 
-  const filteredEvents = events.filter(e => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return (e.machine.hostname.toLowerCase().includes(s) || e.username?.toLowerCase().includes(s) || e.ipAddress?.toLowerCase().includes(s));
-  });
+  const alertCompanies = useMemo(() => {
+    const names = [...new Set(alerts.map(a => a.machine.company?.name).filter(Boolean))];
+    return names.sort();
+  }, [alerts]);
 
-  const filteredAlerts = alerts.filter(a => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return (a.machine.hostname.toLowerCase().includes(s) || a.ipAddress?.toLowerCase().includes(s) || a.description?.toLowerCase().includes(s));
-  });
+  const filteredAlerts = useMemo(() => {
+    return alerts.filter(a => {
+      if (companyFilter && a.machine.company?.name !== companyFilter) return false;
+      if (!search) return true;
+      const s = search.toLowerCase();
+      return (a.machine.hostname.toLowerCase().includes(s) || a.ipAddress?.toLowerCase().includes(s) || a.description?.toLowerCase().includes(s));
+    });
+  }, [alerts, companyFilter, search]);
+
+  const filteredEvents = useMemo(() => {
+    return events.filter(e => {
+      if (companyFilter && e.machine.company?.name !== companyFilter) return false;
+      if (!search) return true;
+      const s = search.toLowerCase();
+      return (e.machine.hostname.toLowerCase().includes(s) || e.username?.toLowerCase().includes(s) || e.ipAddress?.toLowerCase().includes(s));
+    });
+  }, [events, companyFilter, search]);
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-blue-400" size={32} /></div>;
 
@@ -143,7 +174,7 @@ export default function SecurityPage() {
         ))}
       </div>
 
-      {/* Tabs + Search */}
+      {/* Tabs + Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex tm-bg-card rounded-lg p-1">
           {(['alerts', 'events'] as const).map(t => (
@@ -153,11 +184,25 @@ export default function SecurityPage() {
             </button>
           ))}
         </div>
-        <div className="relative flex-1 min-w-[200px]">
+
+        <div className="relative flex-1 min-w-[160px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 tm-text-muted" size={16} />
           <input value={search} onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm focus:outline-none focus:border-blue-500" placeholder="Buscar..." />
         </div>
+
+        {/* Company filter */}
+        <div className="flex items-center gap-1.5">
+          <Building2 size={15} className="tm-text-secondary" />
+          <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)}
+            className="px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">
+            <option value="">Todos os clientes</option>
+            {alertCompanies.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
+
         {tab === 'events' && (
           <select value={eventFilter} onChange={e => setEventFilter(e.target.value)}
             className="px-3 py-2 tm-bg-card border tm-border rounded-lg tm-text text-sm">
@@ -196,6 +241,7 @@ export default function SecurityPage() {
                     }`}>{a.severity}</span>
                     <span className="tm-text font-medium text-sm">{a.type.replace('_', ' ')}</span>
                     <span className="tm-text-muted text-xs">• {a.machine.hostname}</span>
+                    <span className="tm-text-secondary text-xs font-medium">• {a.machine.company?.name}</span>
                   </div>
                   <p className="tm-text text-sm">{a.description}</p>
                   <div className="flex items-center gap-4 mt-2 text-xs tm-text-muted">
@@ -204,20 +250,30 @@ export default function SecurityPage() {
                     {a.resolved && <span className="text-green-400">Resolvido por {a.resolvedBy} em {fmt(a.resolvedAt!)}</span>}
                   </div>
                 </div>
-                {!a.resolved && (
-                  <div className="flex gap-2">
-                    {a.ipAddress && (
-                      <button onClick={() => handleBlockIP(a)} disabled={blocking === a.id}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs rounded-lg transition-colors disabled:opacity-50">
-                        {blocking === a.id ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />} Bloquear IP
+                <div className="flex gap-2 flex-shrink-0">
+                  {!a.resolved && (
+                    <>
+                      {a.ipAddress && (
+                        <button onClick={() => handleBlockIP(a)} disabled={blocking === a.id}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs rounded-lg transition-colors disabled:opacity-50">
+                          {blocking === a.id ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />} Bloquear IP
+                        </button>
+                      )}
+                      <button onClick={() => handleResolve(a.id)}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg transition-colors">
+                        <Check size={14} /> Resolver
                       </button>
-                    )}
-                    <button onClick={() => handleResolve(a.id)}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg transition-colors">
-                      <Check size={14} /> Resolver
-                    </button>
-                  </div>
-                )}
+                    </>
+                  )}
+                  <button
+                    onClick={() => handleDelete(a.id)}
+                    disabled={deletingId === a.id}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs rounded-lg border border-red-500/20 transition-colors disabled:opacity-50"
+                  >
+                    {deletingId === a.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    Excluir
+                  </button>
+                </div>
               </div>
             </motion.div>
           ))}
@@ -232,6 +288,7 @@ export default function SecurityPage() {
               <tr className="border-b tm-border">
                 <th className="text-left px-3 py-2 text-xs tm-text-secondary uppercase">Timestamp</th>
                 <th className="text-left px-3 py-2 text-xs tm-text-secondary uppercase">Máquina</th>
+                <th className="text-left px-3 py-2 text-xs tm-text-secondary uppercase">Cliente</th>
                 <th className="text-left px-3 py-2 text-xs tm-text-secondary uppercase">Evento</th>
                 <th className="text-left px-3 py-2 text-xs tm-text-secondary uppercase">Usuário</th>
                 <th className="text-left px-3 py-2 text-xs tm-text-secondary uppercase">IP</th>
@@ -240,13 +297,14 @@ export default function SecurityPage() {
             </thead>
             <tbody>
               {filteredEvents.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-8 tm-text-muted">Nenhum evento registrado</td></tr>
+                <tr><td colSpan={7} className="text-center py-8 tm-text-muted">Nenhum evento registrado</td></tr>
               ) : filteredEvents.map(e => {
                 const info = eventLabels[e.eventId] || { label: `Event ${e.eventId}`, color: 'tm-text-secondary' };
                 return (
                   <tr key={e.id} className="border-b tm-border hover:tm-bg-card">
                     <td className="px-3 py-2 text-xs tm-text-secondary whitespace-nowrap">{fmt(e.timestamp)}</td>
                     <td className="px-3 py-2 text-sm tm-text">{e.machine.hostname}</td>
+                    <td className="px-3 py-2 text-sm tm-text-secondary">{e.machine.company?.name}</td>
                     <td className="px-3 py-2"><span className={`text-xs font-medium ${info.color}`}>{info.label}</span></td>
                     <td className="px-3 py-2 text-sm tm-text">{e.username || '-'}</td>
                     <td className="px-3 py-2 text-sm tm-text font-mono">{e.ipAddress || '-'}</td>

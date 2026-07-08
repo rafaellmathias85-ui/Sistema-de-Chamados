@@ -139,9 +139,6 @@ export async function DELETE(request: NextRequest) {
     if (!alert) {
       return NextResponse.json({ error: 'Alerta não encontrado' }, { status: 404 });
     }
-    if (!alert.acknowledged) {
-      return NextResponse.json({ error: 'Só é possível excluir alertas reconhecidos' }, { status: 400 });
-    }
 
     await prisma.rmmAlert.delete({ where: { id: alertId } });
     return NextResponse.json({ success: true });
