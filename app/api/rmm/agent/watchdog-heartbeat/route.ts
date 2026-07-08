@@ -71,8 +71,13 @@ export async function POST(request: NextRequest) {
       updateData.agentVersion = agent_version;
     }
 
-    // Atualizar lastCheckin para manter a máquina como online
-    updateData.lastCheckin = new Date();
+    // Só atualiza lastCheckin se o serviço do agente estiver rodando de fato.
+    // O watchdog continua enviando heartbeats mesmo com o agente parado (é uma
+    // Task independente), então não podemos usar seu heartbeat para marcar a
+    // máquina como "online" — apenas o próprio agente pode fazer isso.
+    if (service_running) {
+      updateData.lastCheckin = new Date();
+    }
 
     await prisma.rmmMachine.update({
       where: { id: machine.id },
