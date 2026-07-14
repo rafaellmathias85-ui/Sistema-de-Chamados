@@ -1,6 +1,6 @@
 # ============================================================
 #  Instalador RMM V4 - Winner Tecnologia
-#  Arquitetura: Windows Service (NSSM) + Watchdog hang-aware
+#  Arquitetura: Scheduled Task (agente + watchdog, sem NSSM)
 #  Cliente-agnostico: agente/watchdog sao IGUAIS para todos os
 #  clientes; o que muda por cliente e o config.json + token (DPAPI).
 #
@@ -42,8 +42,7 @@ $AgentFile    = Join-Path $InstallDir "agente_rmm_v4.ps1"
 $WatchdogFile = Join-Path $InstallDir "watchdog_v4.ps1"
 $ConfigFile   = Join-Path $InstallDir "config.json"
 $TokenFile    = Join-Path $SecureDir  "token.dat"
-$NssmExe      = Join-Path $InstallDir "nssm.exe"
-$ServiceName  = "WinnerRMMService"
+$AgentTaskName    = "WinnerRMMAgent"
 $WatchdogTaskName = "WinnerRMMWatchdog"
 $ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
@@ -62,19 +61,13 @@ if (-not $ClientName -and $ScriptFileName -match '^Instalar_RMM_Winner_V4_(.+)_T
     $ClientName = ($Matches[1] -replace '_',' ').Trim()
 }
 
-$NssmUrls = @(
-    "$BASE_SITE_URL/rmm/nssm-2.24-win64.zip",
-    "https://github.com/ONLYOFFICE/nssm/releases/download/v2.24/nssm_x64.zip",
-    "https://nssm.cc/release/nssm-2.24.zip"
-)
-
 $Silent = ($env:RMM_SILENT -eq "1") -or (-not [Environment]::UserInteractive)
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Winner Tecnologia - Instalador RMM V4" -ForegroundColor Cyan
 if ($ClientName) { Write-Host "  Cliente: $ClientName" -ForegroundColor Yellow }
-Write-Host "  Modo: Windows Service + Watchdog hang-aware" -ForegroundColor Yellow
+Write-Host "  Modo: Scheduled Task + Watchdog hang-aware" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 
 # ---------- Admin ----------
@@ -82,32 +75,39 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 if (-not $isAdmin) { Write-Host "[ERRO] Execute como Administrador." -ForegroundColor Red; if (-not $Silent) { Read-Host "Enter para sair" }; exit 1 }
 
 # ---------- Execution Policy ----------
-Write-Host "[1/9] Execution Policy..." -ForegroundColor Cyan
+Write-Host "[1/8] Execution Policy..." -ForegroundColor Cyan
 try { Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope LocalMachine -Force -ErrorAction SilentlyContinue } catch {}
 try { Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force } catch {}
 
 # ---------- Diretorios ----------
-Write-Host "[2/9] Diretorios..." -ForegroundColor Cyan
+Write-Host "[2/8] Diretorios..." -ForegroundColor Cyan
 foreach ($d in @($InstallDir,$ModulesDir,$StagingDir,$SecureDir,$HealthDir)) { if (!(Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null } }
 
 # ---------- Limpar versoes antigas ----------
-Write-Host "[3/9] Removendo versoes antigas (V2/V3)..." -ForegroundColor Cyan
-foreach ($t in @("WinnerRMMAgent","WinnerRMMWatchdog")) {
+Write-Host "[3/8] Removendo versoes antigas (V2/V3)..." -ForegroundColor Cyan
+foreach ($t in @("WinnerRMMWatchdog")) {
     $ex = Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
     if ($ex) { Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue }
 }
-$oldSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+# Remover servico NSSM legado (V4 antigo) se existir
+$oldSvc = Get-Service -Name "WinnerRMMService" -ErrorAction SilentlyContinue
 if ($oldSvc) {
-    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2
-    if (Test-Path $NssmExe) { & $NssmExe remove $ServiceName confirm 2>&1 | Out-Null; Start-Sleep -Seconds 2 }
+    Stop-Service -Name "WinnerRMMService" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    $nssmPath = Join-Path $InstallDir "nssm.exe"
+    if (Test-Path $nssmPath) { & $nssmPath remove "WinnerRMMService" confirm 2>&1 | Out-Null } else { & sc.exe delete "WinnerRMMService" 2>&1 | Out-Null }
+    Start-Sleep -Seconds 2
 }
+# Remover nssm.exe legado
+$nssmLegacy = Join-Path $InstallDir "nssm.exe"
+if (Test-Path $nssmLegacy) { Remove-Item $nssmLegacy -Force -ErrorAction SilentlyContinue }
 # Se havia instalacao V3 em ProgramData, avisa (nao remove dados a toa)
 if (Test-Path "C:\ProgramData\WinnerRMM\agente_rmm_v3.ps1") {
     Write-Host "       (Detectada instalacao V3 em ProgramData - sera substituida pela V4 em Program Files)" -ForegroundColor DarkGray
 }
 
 # ---------- Copiar agente + watchdog (local ou download assinado) ----------
-Write-Host "[4/9] Instalando agente e watchdog..." -ForegroundColor Cyan
+Write-Host "[4/8] Instalando agente e watchdog..." -ForegroundColor Cyan
 $srcAgent    = Join-Path $ScriptDir "agente_rmm_v4.ps1"
 $srcWatchdog = Join-Path $ScriptDir "watchdog_v4.ps1"
 
@@ -154,7 +154,7 @@ if ((Test-Path $srcAgent) -and (Test-Path $srcWatchdog)) {
 }
 
 # ---------- config.json + token (DPAPI) ----------
-Write-Host "[5/9] Configuracao e token..." -ForegroundColor Cyan
+Write-Host "[5/8] Configuracao e token..." -ForegroundColor Cyan
 $config = [ordered]@{
     API_URL              = $ApiUrl
     FALLBACK_API_URL     = $FallbackApiUrl
@@ -191,84 +191,42 @@ if ($CompanyToken) {
     Write-Host "               Baixe o instalador pelo portal (nome contem _TK<token>) ou passe -CompanyToken." -ForegroundColor Yellow
 }
 
-# ---------- NSSM ----------
-Write-Host "[6/9] NSSM (Service Manager)..." -ForegroundColor Cyan
-function Extract-ZipCompat { param([string]$ZipFile,[string]$Destination)
-    if (Test-Path $Destination) { Remove-Item $Destination -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    if (Get-Command Expand-Archive -ErrorAction SilentlyContinue) { Expand-Archive -Path $ZipFile -DestinationPath $Destination -Force; return }
-    try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop; [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipFile,$Destination); return } catch {}
-    $shell = New-Object -ComObject Shell.Application
-    $shell.NameSpace((Resolve-Path $Destination).Path).CopyHere($shell.NameSpace((Resolve-Path $ZipFile).Path).Items(),0x14)
-}
-if (!(Test-Path $NssmExe)) {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    foreach ($u in $NssmUrls) {
-        try {
-            Write-Host "       Tentando: $u" -ForegroundColor DarkGray
-            $zip = Join-Path $InstallDir "nssm.zip"
-            Invoke-WebRequest -Uri $u -OutFile $zip -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
-            if ((Get-Item $zip).Length -lt 10000) { throw "download corrompido" }
-            $ex = Join-Path $InstallDir "nssm_extract"; Extract-ZipCompat -ZipFile $zip -Destination $ex
-            $found = Get-ChildItem $ex -Recurse -Filter "nssm.exe" | Where-Object { $_.DirectoryName -match "win64" } | Select-Object -First 1
-            if (-not $found) { $found = Get-ChildItem $ex -Recurse -Filter "nssm.exe" | Select-Object -First 1 }
-            if ($found) { Copy-Item $found.FullName $NssmExe -Force; Write-Host "       NSSM instalado." -ForegroundColor Green } else { throw "nssm.exe nao achado no zip" }
-            Remove-Item $zip -Force -ErrorAction SilentlyContinue; Remove-Item $ex -Recurse -Force -ErrorAction SilentlyContinue
-            break
-        } catch { Write-Host "       [FALHA] $($_.Exception.Message)" -ForegroundColor Yellow; Remove-Item (Join-Path $InstallDir "nssm.zip") -Force -ErrorAction SilentlyContinue }
-    }
-}
-
 # ---------- Exclusoes de AV (Defender) ----------
-Write-Host "[7/9] Exclusoes de AV (Defender)..." -ForegroundColor Cyan
+Write-Host "[6/8] Exclusoes de AV (Defender)..." -ForegroundColor Cyan
 Add-MpPreference -ExclusionPath "$InstallDir" -ErrorAction SilentlyContinue
-Add-MpPreference -ExclusionProcess "$NssmExe" -ErrorAction SilentlyContinue
 # remove exclusao ampla de powershell.exe se herdada de versoes antigas
 try { Remove-MpPreference -ExclusionProcess "powershell.exe" -ErrorAction SilentlyContinue } catch {}
-Write-Host "       Defender: pasta e nssm.exe excluidos." -ForegroundColor Green
+Write-Host "       Defender: pasta $InstallDir excluida." -ForegroundColor Green
 Write-Host "       [ACAO] AV de TERCEIROS: exclua a pasta $InstallDir na POLITICA do console." -ForegroundColor Yellow
 
-# ---------- Registrar servico ----------
-Write-Host "[8/9] Registrando servico..." -ForegroundColor Cyan
-if (Test-Path $NssmExe) {
-    & $NssmExe install $ServiceName "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" "-ExecutionPolicy Bypass -NonInteractive -File `"$AgentFile`"" 2>&1 | Out-Null
-    & $NssmExe set $ServiceName DisplayName "Winner RMM Agent" 2>&1 | Out-Null
-    & $NssmExe set $ServiceName Description "Agente de monitoramento remoto - Winner Tecnologia" 2>&1 | Out-Null
-    & $NssmExe set $ServiceName AppDirectory "$InstallDir" 2>&1 | Out-Null
-    & $NssmExe set $ServiceName Start SERVICE_AUTO_START 2>&1 | Out-Null
-    & $NssmExe set $ServiceName ObjectName LocalSystem 2>&1 | Out-Null
-    & $NssmExe set $ServiceName AppExit Default Restart 2>&1 | Out-Null
-    & $NssmExe set $ServiceName AppRestartDelay 5000 2>&1 | Out-Null
-    & $NssmExe set $ServiceName AppThrottle 5000 2>&1 | Out-Null
-    & $NssmExe set $ServiceName AppStdout "$InstallDir\service_stdout.log" 2>&1 | Out-Null
-    & $NssmExe set $ServiceName AppStderr "$InstallDir\service_stderr.log" 2>&1 | Out-Null
-    & $NssmExe set $ServiceName AppRotateFiles 1 2>&1 | Out-Null
-    & $NssmExe set $ServiceName AppRotateBytes 5242880 2>&1 | Out-Null
-    Write-Host "       Servico via NSSM." -ForegroundColor Green
-} else {
-    Write-Host "       Fallback sc.exe..." -ForegroundColor Yellow
-    $wrapper = Join-Path $InstallDir "service_wrapper.bat"
-    Set-Content -Path $wrapper -Value "@echo off`r`nC:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File `"$AgentFile`"" -Encoding ASCII
-    & sc.exe create $ServiceName binPath= "cmd.exe /c `"$wrapper`"" start= auto DisplayName= "Winner RMM Agent" 2>&1 | Out-Null
-    & sc.exe description $ServiceName "Agente de monitoramento remoto - Winner Tecnologia" 2>&1 | Out-Null
+# ---------- Registrar agente (Scheduled Task) ----------
+Write-Host "[7/8] Registrando agente (Scheduled Task)..." -ForegroundColor Cyan
+$existingAgentTask = Get-ScheduledTask -TaskName $AgentTaskName -ErrorAction SilentlyContinue
+if ($existingAgentTask) {
+    Stop-ScheduledTask -TaskName $AgentTaskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $AgentTaskName -Confirm:$false -ErrorAction SilentlyContinue
 }
-# SCM retry INFINITO: reset curto (120s) -> nunca desiste (corrige R3 do V3.1)
-& sc.exe failure $ServiceName reset= 120 actions= restart/15000/restart/30000/restart/60000 2>&1 | Out-Null
-& sc.exe failureflag $ServiceName 1 2>&1 | Out-Null
-Write-Host "       SCM failure recovery: retry infinito (15s/30s/60s, reset 120s)." -ForegroundColor Green
+$agentAction    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File `"$AgentFile`""
+$agentTrigger   = New-ScheduledTaskTrigger -AtStartup
+$agentSettings  = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 0)
+$agentPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest -LogonType ServiceAccount
+Register-ScheduledTask -TaskName $AgentTaskName -Action $agentAction -Trigger $agentTrigger -Settings $agentSettings -Principal $agentPrincipal -Description "Agente RMM V4 - Winner Tecnologia" -Force | Out-Null
+Write-Host "       Agente registrado como Scheduled Task (AtStartup, SYSTEM, sem limite de tempo)." -ForegroundColor Green
 
-# Iniciar servico com retry
-$svcStarted = $false
-for ($i=1; $i -le 3; $i++) {
-    try { if (Test-Path $NssmExe) { & $NssmExe start $ServiceName 2>&1 | Out-Null } else { & sc.exe start $ServiceName 2>&1 | Out-Null } } catch {}
+# Iniciar imediatamente
+$agentStarted = $false
+Start-ScheduledTask -TaskName $AgentTaskName -ErrorAction SilentlyContinue
+for ($i = 1; $i -le 3; $i++) {
     Start-Sleep -Seconds 5
-    $s = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($s -and $s.Status -eq 'Running') { $svcStarted = $true; break }
-    Write-Host "       Tentativa $i/3 - aguardando servico..." -ForegroundColor Yellow
+    $agentProc = Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like "*agente_rmm_v4*" }
+    if ($agentProc) { $agentStarted = $true; Write-Host "       Agente em execucao (tentativa $i, PID $($agentProc | Select-Object -First 1 -ExpandProperty ProcessId))." -ForegroundColor Green; break }
+    Write-Host "       Tentativa $i/3 - aguardando agente..." -ForegroundColor Yellow
+    if ($i -lt 3) { Start-ScheduledTask -TaskName $AgentTaskName -ErrorAction SilentlyContinue }
 }
 
 # ---------- Watchdog (Scheduled Task: 5min + boot) ----------
-Write-Host "[9/9] Watchdog (Scheduled Task)..." -ForegroundColor Cyan
+Write-Host "[8/8] Watchdog (Scheduled Task)..." -ForegroundColor Cyan
 $existingWD = Get-ScheduledTask -TaskName $WatchdogTaskName -ErrorAction SilentlyContinue
 if ($existingWD) { Unregister-ScheduledTask -TaskName $WatchdogTaskName -Confirm:$false -ErrorAction SilentlyContinue }
 $wdAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File `"$WatchdogFile`""
@@ -291,29 +249,29 @@ try {
 } catch {}
 
 # ---------- Status final ----------
-$svcCheck = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-$svcStatus = if ($svcCheck -and $svcCheck.Status -eq 'Running') { "RODANDO" } else { "VERIFICAR" }
+$agentFinal = Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*agente_rmm_v4*" }
+$agentFinalStatus = if ($agentFinal) { "RODANDO" } else { "VERIFICAR" }
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  Instalacao V4 concluida!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "  Servico:  $ServiceName ($svcStatus)" -ForegroundColor $(if ($svcStatus -eq "RODANDO") { "Green" } else { "Yellow" })
+Write-Host "  Agente:   WinnerRMMAgent ($agentFinalStatus)" -ForegroundColor $(if ($agentFinalStatus -eq "RODANDO") { "Green" } else { "Yellow" })
 Write-Host "  Watchdog: $WatchdogTaskName (5 min + boot, hang-aware)" -ForegroundColor Gray
 Write-Host "  Pasta:    $InstallDir" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Protecoes ativas:" -ForegroundColor Cyan
-Write-Host "    - SCM auto-restart INFINITO (nunca desiste)" -ForegroundColor Gray
+Write-Host "    - Agente como Scheduled Task (AtStartup, SYSTEM, sem limite de tempo)" -ForegroundColor Gray
 Write-Host "    - Recycle do processo a cada $RecycleHours h (anti-leak/hang)" -ForegroundColor Gray
-Write-Host "    - Watchdog detecta servico parado E processo TRAVADO" -ForegroundColor Gray
+Write-Host "    - Watchdog detecta agente parado E processo TRAVADO" -ForegroundColor Gray
 Write-Host "    - Token cifrado em repouso (DPAPI)" -ForegroundColor Gray
 Write-Host ""
-if (-not $svcStarted) { Write-Host "  [DIAG] Servico ainda nao iniciou; o watchdog assume em ~2-5 min. Ver $InstallDir\service_stderr.log" -ForegroundColor Yellow }
-if (-not $Silent) { try { Read-Host "Pressione Enter para fechar" } catch {} } 
+if (-not $agentStarted) { Write-Host "  [DIAG] Agente ainda nao iniciou; o watchdog assume em ~2-5 min. Ver $InstallDir\rmm_agent.log" -ForegroundColor Yellow }
+if (-not $Silent) { try { Read-Host "Pressione Enter para fechar" } catch {} }
 # SIG # Begin signature block
 # MIIdrwYJKoZIhvcNAQcCoIIdoDCCHZwCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFvMgyiLmysVc+
-# KtX+cics1iZQNQyIST0WaxXpBl1YoKCCF2gwggQqMIICkqADAgECAhBz5g8PdNx1
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoWF5Tf1xxkOlV
+# B1tOGygUycPi5PvxJEASMUC7lTjjWKCCF2gwggQqMIICkqADAgECAhBz5g8PdNx1
 # ukWTcGHAOULUMA0GCSqGSIb3DQEBCwUAMC0xKzApBgNVBAMMIldpbm5lciBUZWNu
 # b2xvZ2lhIFJNTSBDb2RlIFNpZ25pbmcwHhcNMjYwNzA3MjI0MDM5WhcNMzEwNzA3
 # MjI1MDM5WjAtMSswKQYDVQQDDCJXaW5uZXIgVGVjbm9sb2dpYSBSTU0gQ29kZSBT
@@ -442,31 +400,31 @@ if (-not $Silent) { try { Read-Host "Pressione Enter para fechar" } catch {} }
 # ZXIgVGVjbm9sb2dpYSBSTU0gQ29kZSBTaWduaW5nAhBz5g8PdNx1ukWTcGHAOULU
 # MA0GCWCGSAFlAwQCAQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIBdOYGNXqiXZvckzYik0+blf8k/1lyeMQqh5
-# 7m/ixqOCMA0GCSqGSIb3DQEBAQUABIIBgHRUwfIGwcui6PRlAiK4BZ3WENuv9Pni
-# I3xPymOjYtBDfo3CBbyEj1QzFigO3joJ9Ev5QkELhG1HNutqMX50fvuvPOPJRsTv
-# TfG/oNCV/DPEjoGQI96ngzbtFd4Q7wdsiCfPjx6gulfzOZNK3uLTIbMvBeGIFV+A
-# 2nYWNGOvcspRwhymtvhemYs/AV7K0lJyCK2Qdhp0ua+R56ybJiogyc8U8lpWe20T
-# bb1uOxMJxs957UsjyJB7/9LAQufhEEHnWjYKR8JtPWwk1zPeXiRWXekA0PzeJI67
-# 7vTv/BUNltKWHeYhGLAZVyuV/PvnmKuNlftpRyMniaSJ4dEpskJcGuMewq511Ipr
-# MYwbMsYVmy5+LzWwulFP3MGSQ8j7iJp9Mcgaf5N4xE0MjCDOo8sCZMQgBJ/4aN19
-# sJGcJZWyCeJ/SvVU/iQYVoMkKe6k9bFoIDgCc3n3y6n04bBSuu6mAZEb/135DRJ4
-# gFYS+I8gYeHGeWXp9bO8ykUOLMPTLYR1pqGCAyYwggMiBgkqhkiG9w0BCQYxggMT
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIPEmCIeG10fjqmbUmga5fQx9wHvfjlU8P8q/
+# YjY2sIMUMA0GCSqGSIb3DQEBAQUABIIBgHu6/aYacxJrAdDfRyDK29wGsne2f+By
+# i8uTh6Yj2rri0BXQLnpTuYr3Gw2l6T7qFInlCJRmAbUVd03oYrg9WUPvT/1AbmzU
+# b52Simx0FMOIrK7AMxvEsOjNJNmpldl2JkGM7GKlUEU6n573I6rO6GMd9JBf7Jut
+# kTMHdIzKj0Z0SlQE2p2WY8jFYF+bv/6OcioOgtlHRCKBODspitg9Fup6EypT30Zt
+# qHbMOszFI3Cc0b1jmRCAQNv+gcUCv0iIdls0c8eVKSBN7Qoa5hkYW8anpDsBqsVS
+# NTUiYzU0i7Am3c7vOTp4Tv5v7BLiJVUDX7d3rvmGALl5lgQYfUgSbjGCuIBcxzQc
+# oUkO7dkgukoPEijLN55FCXKrh8GU51W2awydqkLVRQvFABvJCYPlnJLq9uAxeAkT
+# m6rk5cVKL8lllzfYa5Ceuw9gsqBMTwEhdpeJ1o8S5nr0x4WrcORJoiQxQcu89xon
+# t6CJotqay8p+wmDEiUpwH1yrgdcQdji3laGCAyYwggMiBgkqhkiG9w0BCQYxggMT
 # MIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5j
 # LjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNB
 # NDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUD
 # BAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEP
-# Fw0yNjA3MDgxMjEwNTdaMC8GCSqGSIb3DQEJBDEiBCCKhcWLPXGOmlsQ+6gdZp4h
-# zqSHXXgWwdhbS9oQaT/tKjANBgkqhkiG9w0BAQEFAASCAgCDDla75xACammI8Evc
-# rMNlvN1zcYmIdLDWNZFn2/FGM6zlXlkxarv7lRrAUjmOgpaKOB1WUJqjNif5AK5C
-# 5N/FhcayGkCfrE/evJC3RbO6E0CicTvdBJoRCw7RNcXOi3gJfWmi+XNdJkMf4JiV
-# /HImVE9pRWCuyIDalSOuysW4UHF5MQD3UhayP3cI7+Sir6t1lll15Y/PwCiGdGa2
-# qt9DB80xigbF391T0l/o/OqKQiJ2rrEaCdLcwnaI3BrgGgZhfyJYfjGTvTfeMnaB
-# ou3OpEr4rnUdxh3KUmk8XTgaHgjngRJ+dRm91cexJTpUQ4J4DT03xdk71Wrk7i92
-# iIAQ24RMc0+YuLwnrAX779FIu9UbmmEWd/Pn4tm9X69IZYOyMrqn330ARbA7IMBm
-# UZkDW2nirU5DlN+Rd5frRmoaDa/ZyuYts/ebn3im4ys4JhhLddMAOGigFD+RfN4T
-# G20diARNuPnGJAOSrDoIdhqhM4JtQ4X9/DoPvuLobSIqVUc3cEo+jv2tYkQ8+tuo
-# mrtxp8TdwIplqjRSEeMRetIEyX4zksVr0dvIck1dQ7TQVpJZyRII9kt87zcyCtMT
-# lMAXrD9l0efg4hV9dOReWFHvAjjQfB6CFe7zVW/ybG6idXTean6Aqm3k4K1OniGH
-# 7jNCsynTuR+84xzUDoy3EgLd9A==
+# Fw0yNjA3MTQxOTAwNDNaMC8GCSqGSIb3DQEJBDEiBCBacKK9J9p1xJ42jT5zxJgL
+# bAkxfsBMVOPWSFKBzz/64zANBgkqhkiG9w0BAQEFAASCAgCXNFwXygGdVCLHbEPi
+# KEsLipCw747K9ow6I8o7Ui1LbQGRjImhS5gObFhvVnNKjh69O42igSHAzj2GL7Vn
+# PyrNBmQtqe7yIEywZc8npbXQ2HMLxnmU/e6Pg9n34AeNWtmiNG39e5eD3jltaF/d
+# hb00pjsCZlqbjAqYhD0rb+Jf5dpYSxMJ8ahdxngni3QMZ4mdmE4MP27WSeRYUvQ9
+# d9TvsgRCK+cEUlI41CiGc/mwA0ZTasr4zVa5iXNUjRqQHyg6jjralSmVenkL7Jem
+# nUWaYFjUeRsU5QtNJS2Ecx0+QS3wUG2FCTsTINAueEcXXFRIrCbpik45uOSt/f2Y
+# Tp3UpywLDeIYBhQNyKd90bjG/5LBPV8Szp+6CWrpNl9xdLaa3rWSDQ7LPq6wULXY
+# KnYxFdjdvRnFJarR3JLfNwzugeW9aNW2RD7/NNJjZIjrGxIajvr5q09IfJMMX1r/
+# Tac3Sr2vWx4/xO2P8W/ILAeu37osrzrTBHEpIbWot/tnRsv63QTmxWXIvSNnbJyn
+# hCVVO6RZc1o430prmd/CuhwM7dRRizK040AXTMNbhQYxuMwkVN5n6Xj2woYBiTC+
+# XheGdCX4km/G8ngW3mSlH7GhtTFZnagMkvNHtE3NdJr0Pe42zpZP+btgbRNhXTZB
+# CtqnL3aHPTqwfFNRe5YWCQVh2g==
 # SIG # End signature block

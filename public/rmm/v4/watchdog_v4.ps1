@@ -2,10 +2,10 @@
 #  Watchdog RMM v4.0 - Winner Tecnologia
 #  Cliente-agnostico (config.json + token DPAPI). Assine uma vez.
 #
-#  Recupera 3 cenarios (o V3.1 so cobria o 1o):
-#   1. Servico parado/inexistente  -> start / reinstala (NSSM)
-#   2. Servico "Running" mas TRAVADO (heartbeat velho) -> restart forcado
-#   3. NSSM/agente sumiram          -> re-baixa / reinstala
+#  Recupera 3 cenarios:
+#   1. Task do agente inexistente    -> re-registra e inicia
+#   2. Agente nao esta rodando       -> inicia via Start-ScheduledTask
+#   3. Agente rodando mas TRAVADO (heartbeat velho) -> mata e reinicia
 #  Alem de: re-registrar a si mesmo e reportar heartbeat ao servidor.
 # ============================================================
 
@@ -15,14 +15,13 @@ $InstallDir   = "C:\Program Files\WinnerRMM"
 $SecureDir    = Join-Path $InstallDir "secure"
 $HealthDir    = Join-Path $InstallDir "health"
 $LogFile      = Join-Path $InstallDir "watchdog.log"
-$NssmExe      = Join-Path $InstallDir "nssm.exe"
 $AgentFile    = Join-Path $InstallDir "agente_rmm_v4.ps1"
 $WatchdogFile = Join-Path $InstallDir "watchdog_v4.ps1"
 $VersionFile  = Join-Path $InstallDir "agent_version"
 $ConfigFile   = Join-Path $InstallDir "config.json"
 $TokenFile    = Join-Path $SecureDir  "token.dat"
 $HeartbeatFile= Join-Path $HealthDir  "heartbeat.json"
-$ServiceName  = "WinnerRMMService"
+$AgentTaskName    = "WinnerRMMAgent"
 $WatchdogTaskName = "WinnerRMMWatchdog"
 
 # ---------- Config ----------
@@ -36,13 +35,6 @@ if (Test-Path $ConfigFile) {
 }
 # limite de "heartbeat velho" = 3x o intervalo de checkin, minimo 180s
 $HB_STALE_SEC = [Math]::Max($CHECKIN_INTERVAL * 3, 180)
-
-$BASE_SITE_URL = $API_URL -replace '/api/rmm/?$',''
-$NssmUrls = @(
-    "$BASE_SITE_URL/rmm/nssm-2.24-win64.zip",
-    "https://github.com/ONLYOFFICE/nssm/releases/download/v2.24/nssm_x64.zip",
-    "https://nssm.cc/release/nssm-2.24.zip"
-)
 
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13 }
 catch { try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {} }
@@ -67,59 +59,49 @@ function Get-CompanyToken {
 }
 $COMPANY_TOKEN = Get-CompanyToken
 
-# ============ ZIP / NSSM ============
-function Extract-ZipCompat {
-    param([string]$ZipFile,[string]$Destination)
-    if (Test-Path $Destination) { Remove-Item $Destination -Recurse -Force -EA SilentlyContinue }
-    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    if (Get-Command Expand-Archive -EA SilentlyContinue) { Expand-Archive -Path $ZipFile -DestinationPath $Destination -Force; return }
-    try { Add-Type -AssemblyName System.IO.Compression.FileSystem -EA Stop; [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipFile,$Destination); return } catch {}
-    $shell = New-Object -ComObject Shell.Application
-    $shell.NameSpace((Resolve-Path $Destination).Path).CopyHere($shell.NameSpace((Resolve-Path $ZipFile).Path).Items(),0x14)
-}
-function Ensure-Nssm {
-    if (Test-Path $NssmExe) { return $true }
-    Write-WatchdogLog "NSSM ausente. Baixando..."
-    foreach ($u in $NssmUrls) {
-        try {
-            $zip = Join-Path $InstallDir "nssm.zip"
-            Invoke-WebRequest -Uri $u -OutFile $zip -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
-            if ((Get-Item $zip).Length -lt 10000) { throw "download corrompido" }
-            $ex = Join-Path $InstallDir "nssm_extract"; Extract-ZipCompat -ZipFile $zip -Destination $ex
-            $found = Get-ChildItem $ex -Recurse -Filter "nssm.exe" | Where-Object { $_.DirectoryName -match "win64" } | Select-Object -First 1
-            if (-not $found) { $found = Get-ChildItem $ex -Recurse -Filter "nssm.exe" | Select-Object -First 1 }
-            if ($found) { Copy-Item $found.FullName $NssmExe -Force; Write-WatchdogLog "NSSM instalado." }
-            Remove-Item $zip -Force -EA SilentlyContinue; Remove-Item $ex -Recurse -Force -EA SilentlyContinue
-            if (Test-Path $NssmExe) { return $true }
-        } catch { Write-WatchdogLog "Falha ${u}: $($_.Exception.Message)"; Remove-Item (Join-Path $InstallDir "nssm.zip") -Force -EA SilentlyContinue }
-    }
-    Write-WatchdogLog "ERRO: nenhuma URL do NSSM funcionou"; return $false
-}
-function Install-WinnerService {
-    if (-not (Test-Path $AgentFile)) { Write-WatchdogLog "ERRO: agente ausente em $AgentFile"; return $false }
-    if (-not (Ensure-Nssm)) { return $false }
+# ============ AGENT TASK / PROCESS ============
+function Get-AgentProcess {
     try {
-        if (Get-Service -Name $ServiceName -EA SilentlyContinue) { & $NssmExe stop $ServiceName 2>&1 | Out-Null; Start-Sleep 2; & $NssmExe remove $ServiceName confirm 2>&1 | Out-Null; Start-Sleep 2 }
-        & $NssmExe install $ServiceName "powershell.exe" "-ExecutionPolicy Bypass -NonInteractive -File `"$AgentFile`"" 2>&1 | Out-Null
-        & $NssmExe set $ServiceName DisplayName "Winner RMM Agent" 2>&1 | Out-Null
-        & $NssmExe set $ServiceName Description "Agente de monitoramento remoto - Winner Tecnologia" 2>&1 | Out-Null
-        & $NssmExe set $ServiceName AppDirectory "$InstallDir" 2>&1 | Out-Null
-        & $NssmExe set $ServiceName Start SERVICE_AUTO_START 2>&1 | Out-Null
-        & $NssmExe set $ServiceName ObjectName LocalSystem 2>&1 | Out-Null
-        & $NssmExe set $ServiceName AppExit Default Restart 2>&1 | Out-Null
-        & $NssmExe set $ServiceName AppRestartDelay 5000 2>&1 | Out-Null
-        & $NssmExe set $ServiceName AppThrottle 5000 2>&1 | Out-Null
-        & $NssmExe set $ServiceName AppStdout "$InstallDir\service_stdout.log" 2>&1 | Out-Null
-        & $NssmExe set $ServiceName AppStderr "$InstallDir\service_stderr.log" 2>&1 | Out-Null
-        & $NssmExe set $ServiceName AppRotateFiles 1 2>&1 | Out-Null
-        & $NssmExe set $ServiceName AppRotateBytes 5242880 2>&1 | Out-Null
-        # SCM retry infinito: reset curto (120s) -> nunca "desiste"
-        & sc.exe failure $ServiceName reset= 120 actions= restart/15000/restart/30000/restart/60000 2>&1 | Out-Null
-        & sc.exe failureflag $ServiceName 1 2>&1 | Out-Null
-        & $NssmExe start $ServiceName 2>&1 | Out-Null
-        Write-WatchdogLog "Servico $ServiceName instalado e iniciado."
+        return Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -like "*agente_rmm_v4*" } | Select-Object -First 1
+    } catch { return $null }
+}
+
+function Invoke-EnsureAgentTask {
+    if (-not (Test-Path $AgentFile)) { Write-WatchdogLog "ERRO: agente ausente em $AgentFile"; return $false }
+    try {
+        $existing = Get-ScheduledTask -TaskName $AgentTaskName -ErrorAction SilentlyContinue
+        if (-not $existing) {
+            Write-WatchdogLog "Task $AgentTaskName ausente. Re-registrando..."
+            $act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File `"$AgentFile`""
+            $trg = New-ScheduledTaskTrigger -AtStartup
+            $set = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 0)
+            $prc = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest -LogonType ServiceAccount
+            Register-ScheduledTask -TaskName $AgentTaskName -Action $act -Trigger $trg -Settings $set -Principal $prc -Description "Agente RMM V4 - Winner Tecnologia" -Force | Out-Null
+            Write-WatchdogLog "Task $AgentTaskName re-registrada."
+        }
+        Start-ScheduledTask -TaskName $AgentTaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 5
+        $proc = Get-AgentProcess
+        if ($proc) { Write-WatchdogLog "Agente iniciado (PID $($proc.ProcessId))."; return $true }
+        Write-WatchdogLog "Task iniciada (processo ainda inicializando)."
         return $true
-    } catch { Write-WatchdogLog "Erro ao instalar servico: $($_.Exception.Message)"; return $false }
+    } catch { Write-WatchdogLog "Erro ao iniciar agente: $($_.Exception.Message)"; return $false }
+}
+
+function Restart-HungAgent {
+    Write-WatchdogLog "HANG detectado (heartbeat > ${HB_STALE_SEC}s). Matando processo e reiniciando..."
+    try {
+        $procs = Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -like "*agente_rmm_v4*" }
+        foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Seconds 3
+        Start-ScheduledTask -TaskName $AgentTaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 5
+        $proc = Get-AgentProcess
+        if ($proc) { return "hung_restarted" }
+        return "hung_restart_failed"
+    } catch { Write-WatchdogLog "Erro no restart de hang: $($_.Exception.Message)"; return "hung_restart_error" }
 }
 
 # ============ HEALTH ============
@@ -132,29 +114,27 @@ function Get-HeartbeatAgeSec {
     # fallback: mtime do arquivo
     try { return ((Get-Date) - (Get-Item $HeartbeatFile).LastWriteTime).TotalSeconds } catch { return $null }
 }
-function Get-ServiceHealth {
-    $h = @{ service_exists=$false; service_running=$false; nssm_exists=(Test-Path $NssmExe); agent_exists=(Test-Path $AgentFile); agent_version=$null; heartbeat_age=$null; hung=$false }
-    $svc = Get-Service -Name $ServiceName -EA SilentlyContinue
-    if ($svc) { $h.service_exists=$true; $h.service_running=($svc.Status -eq 'Running') }
-    if (Test-Path $VersionFile) { $h.agent_version=(Get-Content $VersionFile -EA SilentlyContinue).Trim() }
+function Get-AgentHealth {
+    $h = @{
+        task_exists    = $false
+        agent_running  = $false
+        agent_exists   = (Test-Path $AgentFile)
+        agent_version  = $null
+        heartbeat_age  = $null
+        hung           = $false
+    }
+    $task = Get-ScheduledTask -TaskName $AgentTaskName -ErrorAction SilentlyContinue
+    if ($task) { $h.task_exists = $true }
+    $proc = Get-AgentProcess
+    if ($proc) { $h.agent_running = $true }
+    if (Test-Path $VersionFile) { $h.agent_version = (Get-Content $VersionFile -EA SilentlyContinue).Trim() }
     $h.heartbeat_age = Get-HeartbeatAgeSec
-    if ($h.service_running -and $null -ne $h.heartbeat_age -and $h.heartbeat_age -gt $HB_STALE_SEC) { $h.hung = $true }
+    if ($h.agent_running -and $null -ne $h.heartbeat_age -and $h.heartbeat_age -gt $HB_STALE_SEC) { $h.hung = $true }
     return $h
-}
-function Restart-HungService {
-    Write-WatchdogLog "HANG detectado (heartbeat > ${HB_STALE_SEC}s). Reiniciando servico..."
-    try {
-        # mata qualquer processo do agente que tenha ficado orfao/travado
-        if (Test-Path $NssmExe) { & $NssmExe restart $ServiceName 2>&1 | Out-Null } else { Restart-Service -Name $ServiceName -Force -EA SilentlyContinue }
-        Start-Sleep 5
-        $svc = Get-Service -Name $ServiceName -EA SilentlyContinue
-        if ($svc -and $svc.Status -eq 'Running') { return "hung_restarted" }
-        return "hung_restart_failed"
-    } catch { Write-WatchdogLog "Erro no restart de hang: $($_.Exception.Message)"; return "hung_restart_error" }
 }
 
 # ============ AUTO-HEAL: re-registrar a propria task ============
-function Ensure-Self {
+function Invoke-EnsureSelf {
     try {
         $wd = Get-ScheduledTask -TaskName $WatchdogTaskName -EA SilentlyContinue
         if ($wd) { return }
@@ -170,61 +150,63 @@ function Ensure-Self {
 }
 
 # ============ HEARTBEAT AO SERVIDOR ============
-function Send-WatchdogHeartbeat($h,$action) {
+function Send-WatchdogHeartbeat($h, $action) {
     try {
-        $body = @{ hostname=$env:COMPUTERNAME; token=$COMPANY_TOKEN; service_exists=$h.service_exists; service_running=$h.service_running
-            nssm_exists=$h.nssm_exists; agent_exists=$h.agent_exists; agent_version=$h.agent_version
-            heartbeat_age_sec=$h.heartbeat_age; hung=$h.hung; watchdog_action=$action; timestamp=(Get-Date).ToString("o") } | ConvertTo-Json -Depth 3
-        $servers = @($API_URL); if ($FALLBACK_API_URL -and $FALLBACK_API_URL -ne '' -and $FALLBACK_API_URL -ne $API_URL) { $servers += $FALLBACK_API_URL }
+        $body = @{
+            hostname          = $env:COMPUTERNAME
+            token             = $COMPANY_TOKEN
+            service_exists    = $h.task_exists      # task existe (API compat)
+            service_running   = $h.agent_running    # processo rodando (API compat)
+            nssm_exists       = $false              # sem NSSM
+            agent_exists      = $h.agent_exists
+            agent_version     = $h.agent_version
+            heartbeat_age_sec = $h.heartbeat_age
+            hung              = $h.hung
+            watchdog_action   = $action
+            timestamp         = (Get-Date).ToString("o")
+        } | ConvertTo-Json -Depth 3
+        $servers = @($API_URL)
+        if ($FALLBACK_API_URL -and $FALLBACK_API_URL -ne '' -and $FALLBACK_API_URL -ne $API_URL) { $servers += $FALLBACK_API_URL }
         foreach ($s in $servers) {
             $url = ($s -replace '/api/rmm$','') + "/api/rmm/agent/watchdog-heartbeat"
-            try { Invoke-RestMethod -Uri $url -Method POST -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -ContentType "application/json; charset=utf-8" -TimeoutSec 15 -ErrorAction Stop | Out-Null; return } catch { continue }
+            try { Invoke-RestMethod -Uri $url -Method POST -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -ContentType "application/json; charset=utf-8" -TimeoutSec 15 -EA Stop | Out-Null; return } catch { continue }
         }
     } catch { Write-WatchdogLog "Erro heartbeat servidor: $($_.Exception.Message)" }
 }
 
 # ============ MAIN ============
-Write-WatchdogLog "=== Watchdog v4 executado (HB stale limite ${HB_STALE_SEC}s) ==="
-Ensure-Self
-$health = Get-ServiceHealth
+Write-WatchdogLog "=== Watchdog v4 executado (modo Task, HB stale limite ${HB_STALE_SEC}s) ==="
+Invoke-EnsureSelf
+$health = Get-AgentHealth
 $action = "none"
 
 if (-not $health.agent_exists) {
     Write-WatchdogLog "CRITICO: agente ausente em $AgentFile. Watchdog nao pode recuperar (precisa reinstalar)."
     $action = "agent_missing"
-} elseif (-not $health.service_exists) {
-    Write-WatchdogLog "Servico inexistente. Recriando..."
-    $action = if (Install-WinnerService) { "service_recreated" } else { "service_recreate_failed" }
-    $health = Get-ServiceHealth
-} elseif (-not $health.service_running) {
-    Write-WatchdogLog "Servico parado. Iniciando..."
-    try {
-        Start-Service -Name $ServiceName -ErrorAction Stop; Start-Sleep 3
-        $svc = Get-Service -Name $ServiceName -EA SilentlyContinue
-        if ($svc -and $svc.Status -eq 'Running') { $action = "service_started" }
-        else { $action = if (Install-WinnerService) { "service_reinstalled" } else { "service_reinstall_failed" } }
-    } catch { $action = if (Install-WinnerService) { "service_reinstalled" } else { "service_reinstall_failed" } }
-    $health = Get-ServiceHealth
+} elseif (-not $health.task_exists) {
+    Write-WatchdogLog "Task do agente inexistente. Recriando..."
+    $action = if (Invoke-EnsureAgentTask) { "task_recreated" } else { "task_recreate_failed" }
+    $health = Get-AgentHealth
+} elseif (-not $health.agent_running) {
+    Write-WatchdogLog "Agente nao esta rodando. Iniciando..."
+    $action = if (Invoke-EnsureAgentTask) { "agent_started" } else { "agent_start_failed" }
+    $health = Get-AgentHealth
 } elseif ($health.hung) {
-    # CENARIO NOVO no V4: vivo mas travado
-    $action = Restart-HungService
-    $health = Get-ServiceHealth
+    $action = Restart-HungAgent
+    $health = Get-AgentHealth
 } else {
     $hbTxt = if ($null -ne $health.heartbeat_age) { "$([int]$health.heartbeat_age)s" } else { "n/a" }
-    Write-WatchdogLog "Servico OK (Running, heartbeat $hbTxt)"
+    Write-WatchdogLog "Agente OK (rodando, heartbeat $hbTxt)"
     $action = "healthy"
 }
 
-if (-not $health.nssm_exists -and $health.agent_exists) { Write-WatchdogLog "NSSM ausente. Re-baixando..."; Ensure-Nssm }
-
 Send-WatchdogHeartbeat $health $action
 Write-WatchdogLog "Watchdog concluido. Acao: $action"
-
 # SIG # Begin signature block
 # MIIdrwYJKoZIhvcNAQcCoIIdoDCCHZwCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB85x4ENQuTWQ6T
-# 39PhHpxIkhiL8oZI8u28losg6BRRo6CCF2gwggQqMIICkqADAgECAhBz5g8PdNx1
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBD6H754oXdl2h0
+# sHFMXvukootRrHsx44TPt1QTuENED6CCF2gwggQqMIICkqADAgECAhBz5g8PdNx1
 # ukWTcGHAOULUMA0GCSqGSIb3DQEBCwUAMC0xKzApBgNVBAMMIldpbm5lciBUZWNu
 # b2xvZ2lhIFJNTSBDb2RlIFNpZ25pbmcwHhcNMjYwNzA3MjI0MDM5WhcNMzEwNzA3
 # MjI1MDM5WjAtMSswKQYDVQQDDCJXaW5uZXIgVGVjbm9sb2dpYSBSTU0gQ29kZSBT
@@ -353,31 +335,31 @@ Write-WatchdogLog "Watchdog concluido. Acao: $action"
 # ZXIgVGVjbm9sb2dpYSBSTU0gQ29kZSBTaWduaW5nAhBz5g8PdNx1ukWTcGHAOULU
 # MA0GCWCGSAFlAwQCAQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIOxXk/bz8SlE6yFmr8hya+cHo80/iwnLuYYH
-# 4sVNSu89MA0GCSqGSIb3DQEBAQUABIIBgI1Qs1WxyMTzChHedNuE3nRRPw6Ai1wT
-# +R8BgNIzj8xqwsxeRcBpgzPiMw7k5XlUkHhR0UB/IJD8C/ZN/Dw4MQdq48c4HMB6
-# X5PEePRlgMd8+xvrSvaAkWTWB58JOODTBlkvSVmhGJ2SsG9pPFEiu2QOAngbRvL6
-# XRqiEMkGHrnsB0NWVcKOxQAlWYCeEEz83dYxJ8hOrhO8tZnh/jP/Oodv4zcq3Zvd
-# IJDpAZeFOrF5UI65QtqKlv1C8DozByh6ko+xxQc7azkXSwbkPVEQutyixn0YQFUt
-# Afa4vI2ztEOL85noE1y11UzJeWZHehNHNA1exA3VFs6LQNwiHHmEHJFGEPsIUf+A
-# ytzrvj3KQ3lllqxKUx8dePKd9ur5/cWrWwnUgeW9mUFItae1pnB72HDwZ1J1ZfF1
-# qxGc/fcHUhqTX9kMie7EQpPugBnP0z/6cIOh/0cMS2fgCXHLN3UaVEXn+D3pAOP5
-# UVTlfkOSqT4YR9rk8kg13qchhCqr0WY4OqGCAyYwggMiBgkqhkiG9w0BCQYxggMT
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIGxOf3R5B+hiB/+i2uyIK3TzKfUhUJXZ9XYG
+# KEir2YarMA0GCSqGSIb3DQEBAQUABIIBgEZ4vfZ0Sw9cQaQTplMSeq0K0Wyu9UCZ
+# qf81rupjdTZy6BEkblG5m+Y4++ZZuAoDfUquNeEbBEsSTajNJ1sHfQcRe9RkWAtq
+# 1MlmhLHLlkYNB6j4xhWAeztNc8QT11VfGjdiYqEWxNANGuNp8+t4xjuJ9MKh5lYv
+# O1APLMy7mZQxmiB62aSf8RFR5wuHR0Ao0XbkT8nkSTT8t/9bH30NE5W+fyjSOw1X
+# UT8OtMwiqLeN8PbXCFJWJ+w9iuakpbKJqUX/8xvElNdA68sQjEkrl53LwONtf0fa
+# 6KDjaeTo38i7pn1JqAl+kquIfOcaaQLQdtaqi/U1qMpuQVeIUWxy3t/M+L0mDwg1
+# F615W5mItO2kDy9hehqdvUblM4WfoB9wy+2tznYcUwYWzjRgaV8bLLtol46Opav6
+# 63hb9o6EB6Kh8yWEHB4EQudTY8mQmqng9kvFT20MA3ZBy1MDaAZHUa/FHCeC687t
+# F5do7H4KlY0FtEa+7ZJHXz27QU1XOTAFAaGCAyYwggMiBgkqhkiG9w0BCQYxggMT
 # MIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5j
 # LjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNB
 # NDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUD
 # BAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEP
-# Fw0yNjA3MTQxODI0MDhaMC8GCSqGSIb3DQEJBDEiBCAZab4pZNLAD5VXPQGIXdxV
-# gWvZcNB6Nf6pEkX9cuRZ2TANBgkqhkiG9w0BAQEFAASCAgBAx2my/0RDWJdivpYv
-# i7A3HOpBHw1PQlZpPBn30XxoxqG2LDSWZSyFRUI5SRMjyZTloAosrzKqWDlqPVd9
-# Z5ElX6LrDj7f6TGMIMPcjaSWvUBMGN0Fvq6j9EOYwqNA502S11RQW496XHJQ8jRF
-# 6dDtNF/AJSdDsskxiQMcCVQx3K/gGvfp2Zl5oIIS15RJ5tUAsB1JBmTgsirRvZSI
-# spb3ukBtVirrgEUijq6ww8tKpV/L/FYnhndzTlTUiLqp0dwwxS80LXSr/foy5ADl
-# 3tGcbHcEjRCAD9YF4YMiTJcY03IJkPNWmtI8IG8t21zrU+ON1dNgBRb7ZIoTQWc+
-# aVMofbJZyepj6wvq2tG7X2fyUP0u3P9D5mbLYDQCUZ7jFTZ9OAVb8wCfsEDgbHEf
-# nFS1YIRvDRIY2KqjbcGtqEHqctH67+V5LmzNYjuhULLs7VTOEUEq/QIspiYBE/Zz
-# iJvYpJGnfTixp0edulAz1Mm5M+HycmCSDQ8/hBAAUoPkwmSvIl2E5FiMNd8p+VQ0
-# oGGFsiwN2APXy0u+POJWWXz+OJDbcGcy69Vjujr9SJung/52Jf5uit5u4JuHjtl5
-# 0Qp0Tc2F+1OP+X3U4LV2swaoZdcZYcX7csWZhhS4uwViC+etO8IObJBCfBaCN/go
-# khRpPewRkRmyZvOMQBMPeFMIPw==
+# Fw0yNjA3MTQxOTAwNDJaMC8GCSqGSIb3DQEJBDEiBCAMsJk9g7QNVUccvwNqoEWM
+# J36w9XmNZDacmtIrRN2/LTANBgkqhkiG9w0BAQEFAASCAgCgvinf0Ad6BRQXAilJ
+# LtdZf/TzDIy2Q4oz2fW1DuYXcvSBR3nENFW4BFRMc/JddhWr4s8EVw2S+A8ZwhPW
+# Xjod3Xqy5tBejx3q/gyTTTfgQAxuRG75e2+eUzEWVxvzd9UHVpBqIknFUZrOxB3Z
+# Kz+SCHn2QyzMDP+Jk3YEMOMkokqerQjpdA4JxPdDVlwljfGcrGHGmTBIWQiTqfOK
+# 3X53wVwXBqHVxaIwdP7eL5LkUpI1Hi+pZ1q1cj0ndk0DsitnN9FaUO7NruBoIsIC
+# mcuIZBnyMWceTqIOs2DhmUkR0Oyz/29iuQDPLa6ay0rnN/gs42L+wzqmRb+sLQAm
+# AHfynAbkuz5eiM8zoPtGKbpROFVNznf+OCWRm3i+LxkzrEeyFqxRurHkJFeYhOQa
+# sYPWvmTlVOEAXU87cV+vTRAXxQ7vhpF2CWdw+q/r2c9fSeRzjKEzwUTW6f95sYDZ
+# ONAOVIXzb/t+4gIhGkzxhsMItoN3LoxNr4lJgrDrseoSrm4pbiJQ+DezRUANDIVA
+# c6CWWH7u9qNwkcUFp4bQhlein/OI1mtkl3UfGXkg5fPt8K7iknFTGy1jTn7JJsuS
+# BsFRz+vaYdQJDCN5lXzi1BlG4yTvrgczJwKpnLDw+0PMJmytl1rsObdHXEVYDiYG
+# Ohg8+08Dy3mqO92JpwLofq/IfA==
 # SIG # End signature block
