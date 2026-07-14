@@ -238,10 +238,11 @@ export async function saveEmailAttachmentsToTicket(
       const safeName = (att.name || 'anexo').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
       const contentType = att.contentType || 'application/octet-stream';
 
-      // Imagens inline: salvar e mapear CID para URL
-      // NOTA: Alguns clientes de email (Gmail via M365) podem enviar imagens inline
-      // sem marcar isInline=true mas com contentId preenchido. Tratamos ambos os casos.
-      if (att.contentId && (att.isInline || contentType.startsWith('image/'))) {
+      // Imagens explicitamente inline (marcadas pelo servidor): salvar e mapear CID para URL.
+      // Não usamos contentType.startsWith('image/') como critério porque o Outlook/M365
+      // inclui contentId em anexos de imagem normais (clipe 📎), o que causava anexos
+      // sendo tratados como inline sem criar registros TicketAttachment.
+      if (att.contentId && att.isInline) {
         const inlineName = `tickets/${ticketId}/inline-${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${safeName}`;
         const { cloudStoragePath } = await storage.save(inlineName, buffer, contentType, true);
         const url = await storage.getUrl(cloudStoragePath, true);
@@ -250,9 +251,16 @@ export async function saveEmailAttachmentsToTicket(
         continue;
       }
 
-      // Anexo regular
+      // Anexo regular (inclui imagens com contentId mas isInline=false).
+      // Se tem contentId, mapear CID para resolução no HTML (Gmail via M365).
       const fileName = `tickets/${ticketId}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${safeName}`;
       const { cloudStoragePath } = await storage.save(fileName, buffer, contentType, false);
+
+      if (att.contentId) {
+        const url = await storage.getUrl(cloudStoragePath, false);
+        const cleanCid = att.contentId.replace(/^<|>$/g, '');
+        cidMap[cleanCid] = url;
+      }
 
       await prisma.ticketAttachment.create({
         data: {
