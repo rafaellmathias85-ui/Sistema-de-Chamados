@@ -76,6 +76,7 @@ interface MachineDetail {
   memoryModulesJson: string | null;
   agentVersion: string | null;
   agentType: string | null;
+  macAddress: string | null;
   updateChannel: string | null;
   company: { id: string; name: string };
   tasks: RmmTask[];
@@ -432,6 +433,7 @@ export default function MachineDetailPage() {
             { label: 'Fabricante', value: machine.manufacturer || '—', icon: Building2 },
             { label: 'Modelo', value: machine.model || '—', icon: Cpu },
             { label: 'IP Local', value: machine.ipAddress || '—', icon: Globe },
+            { label: 'MAC Address', value: machine.macAddress || '—', icon: Network },
             { label: 'IP Público', value: machine.publicIp || '—', icon: Globe },
             { label: 'Usuário', value: machine.username || '—', icon: User },
             { label: 'Empresa', value: machine.company.name, icon: Building2 },

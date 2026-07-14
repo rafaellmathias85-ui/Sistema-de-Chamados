@@ -18,6 +18,8 @@ export async function POST(request: NextRequest) {
       memory_slots_total, memory_slots_used, memory_modules,
       // Agent version (V3+)
       agent_version,
+      // Network
+      mac_address,
     } = body;
 
     if (!token || !hostname) {
@@ -60,6 +62,7 @@ export async function POST(request: NextRequest) {
     }
     // Melhoria E (V3): Agent version tracking
     if (agent_version !== undefined) extendedData.agentVersion = agent_version || null;
+    if (mac_address !== undefined) extendedData.macAddress = mac_address || null;
 
     const baseData = {
       username: user || null,

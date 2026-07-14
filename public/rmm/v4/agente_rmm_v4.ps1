@@ -190,6 +190,15 @@ function Get-LocalIP {
     } catch {}
     return "0.0.0.0"
 }
+function Get-MacAddress {
+    try {
+        $a = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch "Loopback" -and $_.IPAddress -ne "127.0.0.1" -and $_.PrefixOrigin -ne "WellKnown" }
+        $best = $a | Where-Object { $_.InterfaceAlias -match "Ethernet|Wi-Fi|LAN" } | Select-Object -First 1
+        if (-not $best) { $best = $a | Select-Object -First 1 }
+        if ($best) { $ad = Get-NetAdapter -Name $best.InterfaceAlias -EA SilentlyContinue; if ($ad) { return $ad.MacAddress } }
+    } catch {}
+    return $null
+}
 function Get-PublicIP {
     try {
         $cacheFile = Join-Path $InstallDir "public_ip.cache"
@@ -314,7 +323,7 @@ function Refresh-Inventory {
         disk_model=$disk.model; disk_size=$disk.size; cpu_model=Get-CpuModel; gpu_info=Get-GpuInfo
         teamviewer_id=Get-TeamViewerId; serial_number=Get-SerialNumber; manufacturer=Get-Manufacturer
         machine_model=Get-MachineModel; memory_slots_total=$mem.total; memory_slots_used=$mem.used
-        memory_modules=$mem.modules; services=Get-WindowsServices; installed_apps=Get-InstalledApps
+        memory_modules=$mem.modules; mac_address=Get-MacAddress; services=Get-WindowsServices; installed_apps=Get-InstalledApps
     }
     Write-Log "[Inventory] Inventario pesado atualizado."
 }

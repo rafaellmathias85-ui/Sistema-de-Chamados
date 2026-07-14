@@ -168,6 +168,21 @@ function Get-LocalIP {
     } catch { return "0.0.0.0" }
 }
 
+function Get-MacAddress {
+    try {
+        $adapters = Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+            $_.InterfaceAlias -notmatch "Loopback" -and $_.IPAddress -ne "127.0.0.1" -and $_.PrefixOrigin -ne "WellKnown"
+        }
+        $best = $adapters | Where-Object { $_.InterfaceAlias -match "Ethernet|Wi-Fi|LAN" } | Select-Object -First 1
+        if (-not $best) { $best = $adapters | Select-Object -First 1 }
+        if ($best) {
+            $adapter = Get-NetAdapter -Name $best.InterfaceAlias -ErrorAction SilentlyContinue
+            if ($adapter) { return $adapter.MacAddress }
+        }
+    } catch {}
+    return $null
+}
+
 function Get-PublicIP {
     try {
         $resp = Invoke-RestMethod -Uri "https://api.ipify.org?format=json" -TimeoutSec 5
@@ -393,6 +408,7 @@ function Collect-Data {
         status             = "Ligado"
         last_login         = $lastBoot.ToString("yyyy-MM-dd HH:mm:ss")
         ip_address         = Get-LocalIP
+        mac_address        = Get-MacAddress
         public_ip          = Get-PublicIP
         cpu_model          = Get-CpuModel
         cpu_usage          = Get-CpuUsage
