@@ -2,11 +2,11 @@
     "version":  "4.0.0",
     "signed":  true,
     "cert_thumbprint":  "6CCD3489FDE681CC78CECFCC0FFDC426A2CEFA5C",
-    "generated_utc":  "2026-07-14T17:00:00Z",
+    "generated_utc":  "2026-07-14T19:00:00Z",
     "files":  [
                   {
                       "name":  "agente_rmm_v4.ps1",
-                      "sha256":  "B1FC79FE78B4E29044CCA9B4A607154FD5C2CA35B327C627AC6E355F65A10BE2",
+                      "sha256":  "AC463B35E28DAA78F1F795AB6272F81B7B4B0AFE3E32D341D508CD9CFD8AB64F",
                       "url":  "https://wticorp.com.br/rmm/v4/agente_rmm_v4.ps1"
                   },
                   {
