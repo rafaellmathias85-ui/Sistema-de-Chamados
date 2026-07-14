@@ -379,6 +379,9 @@ model RmmMachine {
   memorySlotsUsed    Int?    // Slots de memoria preenchidos
   memoryModulesJson  String? // JSON [{capacity, speed, manufacturer, slot}]
   
+  // Network
+  macAddress      String?   // MAC address da placa de rede principal
+
   // RMM v2 - Agent Version Control (migração SQL executada no VPS)
   agentVersion    String?
   agentType       String?   @default("ps1")
