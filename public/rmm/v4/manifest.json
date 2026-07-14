@@ -2,16 +2,16 @@
     "version":  "4.0.0",
     "signed":  true,
     "cert_thumbprint":  "6CCD3489FDE681CC78CECFCC0FFDC426A2CEFA5C",
-    "generated_utc":  "2026-07-14T15:30:00Z",
+    "generated_utc":  "2026-07-14T16:00:00Z",
     "files":  [
                   {
                       "name":  "agente_rmm_v4.ps1",
-                      "sha256":  "56C57014F1EBFC86D1628A1047BB4E7E79CF86A0EE0D802F7F933426E637AADB",
+                      "sha256":  "F1EBB15CCCAA4C0F7D0B153292CEC27B49C4429FAF3DFEAEB7941E98082A7313",
                       "url":  "https://wticorp.com.br/rmm/v4/agente_rmm_v4.ps1"
                   },
                   {
                       "name":  "watchdog_v4.ps1",
-                      "sha256":  "4AD3F69C5A168B62AFDB9378CC6F0B80202FA02689CC0F857128D901365B86B7",
+                      "sha256":  "BAC11FC57B1FD34889137C2BB7EFF0CD4EAB0711527D9C5F60A2A39DA63905A6",
                       "url":  "https://wticorp.com.br/rmm/v4/watchdog_v4.ps1"
                   },
                   {
