@@ -44,22 +44,59 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Nenhuma máquina encontrada' }, { status: 404 });
     }
 
-    // Script PS1 para forcar update do agente (sem acentos para evitar encoding issues)
+    // Script PS1 para forcar update do agente — detecta V4 (Program Files) e V3 (ProgramData)
     const updateCommand = `
-# [WinnerRMM] Forcar atualizacao do agente
+# [WinnerRMM] Forcar atualizacao do agente (compativel V3 e V4)
+$ErrorActionPreference = "SilentlyContinue"
 try {
-    $installDir = "C:\\ProgramData\\WinnerRMM"
-    $modulesDir = "$installDir\\modules"
-    
-    # Remover modulos em cache para forcar redownload
-    if (Test-Path $modulesDir) {
-        Get-ChildItem "$modulesDir\\*.psm1" | Remove-Item -Force -ErrorAction SilentlyContinue
+    $v4Dir = "C:\\Program Files\\WinnerRMM"
+    $v3Dir = "C:\\ProgramData\\WinnerRMM"
+
+    if (Test-Path "$v4Dir\\agente_rmm_v4.ps1") {
+        # Agente V4: aciona self-update imediato via check-update API
+        $stagingDir = Join-Path $v4Dir "staging"
+        New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
+
+        # Ler configuracao e token DPAPI
+        $cfg = Get-Content (Join-Path $v4Dir "config.json") -Raw | ConvertFrom-Json
+        $apiUrl = if ($cfg.API_URL) { $cfg.API_URL } else { "https://wticorp.com.br/api/rmm" }
+        Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+        $tokenBytes = [System.IO.File]::ReadAllBytes((Join-Path $v4Dir "secure\\token.dat"))
+        $token = [System.Text.Encoding]::UTF8.GetString(
+            [System.Security.Cryptography.ProtectedData]::Unprotect($tokenBytes, $null, 'LocalMachine'))
+
+        $currentVersion = if (Test-Path (Join-Path $v4Dir "agent_version")) { (Get-Content (Join-Path $v4Dir "agent_version") -EA SilentlyContinue).Trim() } else { "0" }
+
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $body = @{ hostname=$env:COMPUTERNAME; current_version=$currentVersion } | ConvertTo-Json
+        $resp = Invoke-RestMethod -Uri "$apiUrl/agent/check-update" -Method POST -Body $body -ContentType "application/json" -Headers @{ Authorization="Bearer $token" } -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+
+        if ($resp.update_available -eq $true -and $resp.download_url) {
+            $stagingFile = Join-Path $stagingDir "_new_agente.ps1"
+            Invoke-WebRequest -Uri $resp.download_url -OutFile $stagingFile -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
+            if ($resp.sha256_hash) {
+                $hash = (Get-FileHash -Path $stagingFile -Algorithm SHA256).Hash
+                if ($hash -ne $resp.sha256_hash) { Remove-Item $stagingFile -Force -EA SilentlyContinue; throw "Hash divergente" }
+            }
+            Set-Content -Path (Join-Path $stagingDir "update.ready") -Value $stagingFile -Force
+            Stop-ScheduledTask -TaskName "WinnerRMMAgent" -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+            Start-ScheduledTask -TaskName "WinnerRMMAgent" -ErrorAction SilentlyContinue
+            Write-Output "V4: Update $($resp.new_version) baixado e agente reiniciado."
+        } else {
+            Write-Output "V4: Agente ja esta na versao mais recente ($currentVersion)."
+        }
+    } elseif (Test-Path $v3Dir) {
+        # Agente V3: remove modulos em cache e sinaliza force_update
+        $modulesDir = "$v3Dir\\modules"
+        if (Test-Path $modulesDir) {
+            Get-ChildItem "$modulesDir\\*.psm1" | Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+        Set-Content -Path "$v3Dir\\force_update" -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Force
+        Write-Output "V3: update sinalizado. Agente fara update na proxima iteracao."
+    } else {
+        Write-Output "AVISO: Nenhum agente RMM encontrado nesta maquina."
     }
-    
-    # Sinalizar para o agente fazer update na proxima iteracao
-    Set-Content -Path "$installDir\\force_update" -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Force
-    
-    Write-Output "Update sinalizado com sucesso. Agente fara update na proxima iteracao."
 } catch {
     Write-Output "ERRO: $($_.Exception.Message)"
 }

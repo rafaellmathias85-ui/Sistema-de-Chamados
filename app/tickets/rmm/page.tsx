@@ -90,7 +90,8 @@ export default function RmmDashboardPage() {
     if (v.startsWith('4')) return { label: 'V4', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' };
     if (v.startsWith('3')) return { label: 'V3', color: 'bg-green-500/20 text-green-400 border-green-500/30' };
     if (v.startsWith('2')) return { label: 'V2', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' };
-    return { label: 'V1', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
+    if (v.startsWith('1')) return { label: 'V1', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
+    return { label: v.substring(0, 4), color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
   };
 
   const fetchData = async () => {
