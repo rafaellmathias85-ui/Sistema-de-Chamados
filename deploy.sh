@@ -26,6 +26,12 @@ PORT=3000
 UPLOADS_DIR="/var/lib/helpdesk/uploads"
 APP_USER="ubuntu"
 
+# Safety defaults: production deploy must not alter database data/schema unless
+# an operator explicitly opts in after backup/review.
+DEPLOY_RUN_STATUS_MIGRATION="${DEPLOY_RUN_STATUS_MIGRATION:-0}"
+DEPLOY_DB_PUSH="${DEPLOY_DB_PUSH:-0}"
+DEPLOY_RUN_SEED="${DEPLOY_RUN_SEED:-0}"
+
 # Helper: roda comando pm2 como usuário ubuntu (não root)
 pm2_u() {
   sudo -u "$APP_USER" pm2 "$@"
@@ -40,6 +46,7 @@ echo "[Deploy] Node: $(node -v 2>/dev/null || echo 'N/A')"
 echo "[Deploy] Memória: $(free -m 2>/dev/null | awk '/Mem/{print $4}')MB livre"
 echo "[Deploy] Usuário do script: $(whoami)"
 echo "[Deploy] PM2 alvo: usuário '$APP_USER'"
+echo "[Deploy] DB safety: status_migration=$DEPLOY_RUN_STATUS_MIGRATION db_push=$DEPLOY_DB_PUSH seed=$DEPLOY_RUN_SEED"
 
 show_port_info() {
   echo "[Deploy] --- PORTA $PORT ---"
@@ -147,6 +154,30 @@ if ! grep -q "^NODE_ENV=" .env; then
   echo "NODE_ENV=production" >> .env
 fi
 
+# 2f. CHROMIUM — geração local de PDFs (orçamentos, relatórios, inventário)
+echo ""
+echo "[Deploy] === CHROMIUM (PDF) ==="
+CHROME_BIN=""
+for c in /usr/bin/chromium-browser /usr/bin/chromium /usr/bin/google-chrome-stable /snap/bin/chromium; do
+  if [ -x "$c" ]; then CHROME_BIN="$c"; break; fi
+done
+if [ -z "$CHROME_BIN" ]; then
+  echo "[Deploy] Chromium ausente — instalando..."
+  sudo apt-get update -qq && sudo apt-get install -y -qq chromium-browser 2>/dev/null \
+    || sudo apt-get install -y -qq chromium 2>/dev/null \
+    || sudo snap install chromium 2>/dev/null \
+    || echo "[Deploy] ⚠️ Falha ao instalar Chromium — PDFs usarão fallback externo"
+  for c in /usr/bin/chromium-browser /usr/bin/chromium /snap/bin/chromium; do
+    if [ -x "$c" ]; then CHROME_BIN="$c"; break; fi
+  done
+fi
+if [ -n "$CHROME_BIN" ]; then
+  if ! grep -q "^CHROME_PATH=" .env; then
+    echo "CHROME_PATH=$CHROME_BIN" >> .env
+  fi
+  echo "[Deploy] ✅ Chromium: $CHROME_BIN"
+fi
+
 # Backup
 sudo cp .env "$ENV_BACKUP"
 echo "[Deploy] ✅ .env preservado em $ENV_BACKUP"
@@ -229,17 +260,57 @@ yarn install --frozen-lockfile 2>/dev/null || yarn install
 echo "[Deploy] Prisma generate..."
 yarn prisma generate
 
-echo "[Deploy] Migração segura: TicketStatus enum → String (idempotente)..."
-node scripts/migrate-status-enum-to-string.js 2>&1 || echo "[Deploy] ⚠️ Migração de status falhou (verificar logs)"
-
-echo "[Deploy] Prisma db push (sincronizar schema)..."
-if yarn prisma db push --skip-generate 2>&1; then
-  echo "[Deploy] ✅ Schema sincronizado com sucesso"
+if [ "$DEPLOY_RUN_STATUS_MIGRATION" = "YES_I_HAVE_BACKUP" ]; then
+  echo "[Deploy] Status migration explicitly enabled."
+  node scripts/migrate-status-enum-to-string.js 2>&1 || echo "[Deploy] ⚠️ Migração de status falhou (verificar logs)"
 else
-  echo "[Deploy] ⚠️ ATENÇÃO: prisma db push falhou — schema pode estar dessincronizado!"
-  echo "[Deploy] Execute fix_schema_vps.sql manualmente como postgres se necessário"
+  echo "[Deploy] DB safety: status migration skipped. Set DEPLOY_RUN_STATUS_MIGRATION=YES_I_HAVE_BACKUP to run."
 fi
-npx tsx scripts/seed.ts 2>&1 || echo "[Deploy] ⚠️ Seed falhou (não-crítico)"
+
+if [ "$DEPLOY_DB_PUSH" = "YES_I_HAVE_BACKUP" ]; then
+  echo "[Deploy] Prisma db push explicitly enabled."
+  if yarn prisma db push --skip-generate 2>&1; then
+    echo "[Deploy] ✅ Schema sincronizado com sucesso"
+  else
+    echo "[Deploy] ❌ ERRO CRÍTICO: prisma db push falhou — abortando deploy!"
+    echo "[Deploy] Schema do código NÃO foi aplicado ao banco."
+    echo "[Deploy] Efeito: toda escrita no banco retornaria HTTP 500 se o deploy continuasse."
+    echo "[Deploy] Corrija o problema, ou aplique a coluna manualmente via psql e rerun."
+    exit 1
+  fi
+else
+  echo "[Deploy] DB safety: prisma db push skipped. Set DEPLOY_DB_PUSH=YES_I_HAVE_BACKUP to run."
+  # Detectar se há mudanças de schema pendentes mesmo sem DEPLOY_DB_PUSH.
+  # prisma migrate diff --exit-code sai com código 2 quando há diferenças.
+  # Isso evita que código com novas colunas vá ao ar sem a coluna existir no banco.
+  DB_URL=$(grep '^DATABASE_URL=' .env | cut -d= -f2- | tr -d '"')
+  if [ -n "$DB_URL" ]; then
+    echo "[Deploy] Verificando drift entre schema.prisma e banco..."
+    if npx prisma migrate diff \
+        --from-url "$DB_URL" \
+        --to-schema-datamodel prisma/schema.prisma \
+        --exit-code \
+        --script 2>/dev/null; then
+      echo "[Deploy] ✅ Schema OK — banco sincronizado com schema.prisma"
+    else
+      DIFF_EXIT=$?
+      if [ "$DIFF_EXIT" = "2" ]; then
+        echo "[Deploy] ❌ ABORTANDO: schema.prisma tem colunas/tabelas pendentes que não existem no banco!"
+        echo "[Deploy] Isso causaria HTTP 500 em toda escrita no banco após o deploy."
+        echo "[Deploy] Para aplicar: defina DEPLOY_DB_PUSH=YES_I_HAVE_BACKUP e rerun o workflow."
+        echo "[Deploy] Ou aplique manualmente via SSH: sudo -u postgres psql -d winner_helpdesk"
+        exit 1
+      fi
+    fi
+  fi
+fi
+
+if [ "$DEPLOY_RUN_SEED" = "YES_I_ACCEPT_DATA_CHANGES" ]; then
+  echo "[Deploy] Seed explicitly enabled."
+  npx tsx scripts/seed.ts 2>&1 || echo "[Deploy] ⚠️ Seed falhou (não-crítico)"
+else
+  echo "[Deploy] DB safety: seed skipped. Set DEPLOY_RUN_SEED=YES_I_ACCEPT_DATA_CHANGES to run."
+fi
 
 echo "[Deploy] Limpando .next..."
 rm -rf .next

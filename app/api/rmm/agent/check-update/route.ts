@@ -67,7 +67,10 @@ export async function POST(request: NextRequest) {
     const versionMatch = templateContent.match(/\$AGENT_VERSION\s*=\s*"([^"]+)"/);
     const serverVersion = versionMatch ? versionMatch[1] : '3.0.0';
 
-    if (!current_version || current_version === serverVersion) {
+    // Nunca propor downgrade de major version (segurança extra caso manifest V4 não exista)
+    const agentMajor = parseInt((current_version || '0').split('.')[0]) || 0;
+    const serverMajor = parseInt(serverVersion.split('.')[0]) || 0;
+    if (!current_version || current_version === serverVersion || agentMajor > serverMajor) {
       return NextResponse.json({ update_available: false, current_version: serverVersion });
     }
 

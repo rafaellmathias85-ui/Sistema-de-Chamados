@@ -81,14 +81,16 @@ export default function RmmDashboardPage() {
 
   const isLegacyAgent = (m: RmmMachine) => {
     if (!m.agentVersion) return true;
-    return !m.agentVersion.startsWith('3');
+    const v = m.agentVersion;
+    return !v.startsWith('3') && !v.startsWith('4');
   };
 
   const getVersionBadge = (v: string | null) => {
     if (!v) return { label: 'N/A', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
-    if (v.startsWith('3')) return { label: `V3`, color: 'bg-green-500/20 text-green-400 border-green-500/30' };
-    if (v.startsWith('2')) return { label: `V2`, color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' };
-    return { label: `V1`, color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
+    if (v.startsWith('4')) return { label: 'V4', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' };
+    if (v.startsWith('3')) return { label: 'V3', color: 'bg-green-500/20 text-green-400 border-green-500/30' };
+    if (v.startsWith('2')) return { label: 'V2', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' };
+    return { label: 'V1', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
   };
 
   const fetchData = async () => {

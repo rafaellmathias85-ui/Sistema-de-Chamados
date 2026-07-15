@@ -155,12 +155,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'machineIds[], companyId ou allLegacy=true obrigatório' }, { status: 400 });
     }
 
-    // Filtrar apenas máquinas V1/V2
+    // Filtrar apenas máquinas V1/V2 (excluir V3 e V4 explicitamente)
     const where: Record<string, unknown> = {
       OR: [
         { agentVersion: null },
         { agentVersion: '' },
-        { agentVersion: { not: { startsWith: '3' } } },
+        {
+          AND: [
+            { agentVersion: { not: { startsWith: '3' } } },
+            { agentVersion: { not: { startsWith: '4' } } },
+          ],
+        },
       ],
     };
 
